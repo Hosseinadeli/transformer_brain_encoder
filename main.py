@@ -1,0 +1,476 @@
+import os, argparse, time, glob, pickle, subprocess, shlex, io, pprint
+
+import numpy as np
+import pandas
+from tqdm import tqdm
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.utils.model_zoo
+import torchvision
+import torch.multiprocessing as mp
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.distributed import init_process_group, destroy_process_group
+
+from datasets.nsd_utils import roi_maps
+from datasets.nsd import fetch_dataloaders
+from scipy.stats import pearsonr as corr
+
+from models.cornet import get_cornet_model
+from models.blt import get_blt_model
+
+from models.brain_encoder import brain_encoder
+from engine import train_one_epoch, evaluate, test
+
+import utils.utils as utils 
+from pathlib import Path
+import os
+
+from PIL import Image
+Image.warnings.simplefilter('ignore')
+
+np.random.seed(0)
+torch.manual_seed(0)
+
+try:
+    import wandb
+    os.environ['WANDB_MODE'] = 'offline'
+except ImportError as e:
+    pass 
+
+
+def get_args_parser():
+    parser = argparse.ArgumentParser(description='NSD Training', add_help=False)
+
+    parser.add_argument('--resume', default=None, help='resume from checkpoint')
+    parser.add_argument('--output_path', default='./results/', type=str,
+                        help='if not none, then store the model resuls')
+    
+    parser.add_argument('--save_model', default=False, type=int) 
+    
+    ## NSD params
+    parser.add_argument('--subj', default=1, type=int) 
+    parser.add_argument('--run', default=1, type=int)  
+    parser.add_argument('--data_dir', default='../../../algonauts/algonauts_2023_challenge_data/', type=str)
+    parser.add_argument('--parent_submission_dir', default='./algonauts_2023_challenge_submission/', type=str)
+    
+    parser.add_argument('--saved_feats', default=None, type=str) #'dinov2q'
+    parser.add_argument('--saved_feats_dir', default='../../algonauts_image_features/', type=str) 
+    
+    parser.add_argument('--readout_res', choices=['streams_inc', 'visuals', 'bodies', 'faces', 'places','words',
+                                                  'hemis']
+                        , default='streams_inc', type=str)   
+    
+
+    parser.add_argument('--encoder_arch', choices=['transformer'], 
+                        default='transformer', type=str)
+    
+    parser.add_argument('--objective', choices=['NSD'],
+                        default='classification', help='which model to train')
+    
+    # Backbone
+    parser.add_argument('--backbone_arch', choices=[None, 'dinov2', 'dinov2_q', 
+                                                    'resnet18', 'resnet50',
+                                                    'dinov2_special_token', 'dinov2_q_special_token'],
+                        default='dinov2_q', type=str,
+                        help="Name of the convolutional backbone to use")  #resnet50 resnet18 dinov2
+    
+  
+    parser.add_argument('--dilation', action='store_true',
+                        help="If true, we replace stride with dilation in the last convolutional block (DC5)")
+    parser.add_argument('--position_embedding', default='sine', type=str, choices=('sine', 'learned'),
+                        help="Type of positional embedding to use on top of the image features")
+    parser.add_argument('--return_interm', default=False,
+                        help="Train segmentation head if the flag is provided")
+
+    # * Transformer
+    parser.add_argument('--enc_layers', default=0, type=int,
+                        help="Number of encoding layers in the transformer brain model")
+    parser.add_argument('--dec_layers', default=1, type=int,
+                        help="Number of decoding layers in the transformer brain model")
+    parser.add_argument('--dim_feedforward', default=1024, type=int,
+                        help="Intermediate size of the feedforward layers in the transformer blocks")
+    parser.add_argument('--hidden_dim', default=768, type=int,
+                        help="Size of the embeddings (dimension of the transformer)")  #256  #868 (100+768) 
+    parser.add_argument('--dropout', default=0.1, type=float,
+                        help="Dropout applied in the transformer")
+    parser.add_argument('--nheads', default=16, type=int,
+                        help="Number of attention heads inside the transformer's attentions")
+    parser.add_argument('--num_queries', default=16, type=int,
+                        help="Number of query slots")
+    parser.add_argument('--pre_norm', action='store_true')
+    
+    parser.add_argument('--enc_output_layer', default=1, type=int,
+                    help="Specify the encoder layer that provides the encoder output. default is the last layer")
+    
+    # training parameters
+    parser.add_argument('--num_workers', default=4, type=int,
+                        help='number of data loading num_workers')
+    parser.add_argument('--epochs', default=20, type=int,
+                        help='number of total epochs to run')
+    parser.add_argument('--batch_size', default=32, type=int,
+                        help='mini-batch size')
+    parser.add_argument('--lr', default=.0001, type=float,
+                        help='initial learning rate')
+    parser.add_argument('--weight_decay', default=1e-4, type=float,
+                        help='weight decay ')
+    parser.add_argument('--lr_drop', default=200, type=int)
+    parser.add_argument('--lr_backbone', default=0, type=int)
+    parser.add_argument('--clip_max_norm', default=0.1, type=float,
+                        help='gradient clipping max norm')
+    
+    parser.add_argument('--evaluate', action='store_true', help='just evaluate')
+    
+    parser.add_argument('--wandb_p', default=None, type=str)
+    parser.add_argument('--wandb_r', default=None, type=str)
+
+    # dataset parameters
+    parser.add_argument('--image_size', default=224, type=int, 
+                        help='what size should the image be resized to?')
+    parser.add_argument('--horizontal_flip', default=True,
+                    help='wether to use horizontal flip augmentation')
+    
+    parser.add_argument('--img_channels', default=3, type=int,
+                    help="what should the image channels be (not what it is)?") #gray scale 1 / color 3
+
+    parser.add_argument('--distributed', default=False,
+                        help='whether to use distributed training')
+
+    return parser
+
+
+
+class SetCriterion(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight_dict = {'loss_labels': 1}
+
+        self.readout_res = args.readout_res
+        roi_name_maps, lh_challenge_rois, rh_challenge_rois = roi_maps(args.data_dir)
+        self.roi_name_maps = roi_name_maps
+        
+        self.lh_challenge_rois = torch.tensor(lh_challenge_rois).to(args.device)
+        self.rh_challenge_rois = torch.tensor(rh_challenge_rois).to(args.device)
+        
+        args.lh_vs = len(lh_challenge_rois[args.rois_ind])
+        args.rh_vs = len(rh_challenge_rois[args.rois_ind])
+        
+        self.rois_ind = args.rois_ind
+        
+        self.lh_vs = args.lh_vs 
+        self.rh_v = args.rh_vs 
+
+    def forward(self, outputs, targets):
+
+        assert 'lh_f_pred' in outputs    
+        assert 'rh_f_pred' in outputs 
+
+        # TODO make target not a list 
+        targets = targets[0]
+        
+        if self.readout_res != 'hemis':
+            lh_rois = self.lh_challenge_rois[self.rois_ind]
+            rh_rois = self.rh_challenge_rois[self.rois_ind]
+
+            lh_challenge_rois = []
+            rh_challenge_rois = []
+            for i in range(len(self.roi_name_maps[self.rois_ind])):
+                lh_challenge_rois.append(torch.where(lh_rois == i, 1, 0))
+                rh_challenge_rois.append(torch.where(rh_rois == i, 1, 0))
+
+            lh_challenge_rois = torch.vstack(lh_challenge_rois)
+            rh_challenge_rois = torch.vstack(rh_challenge_rois)
+
+            lh_challenge_rois = torch.tile(lh_challenge_rois[:,:,None], (1,1,targets['lh_f'].shape[0])).permute(2,1,0)
+            rh_challenge_rois = torch.tile(rh_challenge_rois[:,:,None], (1,1,targets['rh_f'].shape[0])).permute(2,1,0)
+            
+            outputs['lh_f_pred'] = torch.sum(torch.mul(lh_challenge_rois, outputs['lh_f_pred'][:,:,:len(self.roi_name_maps[self.rois_ind])]), dim=2)
+            outputs['rh_f_pred'] = torch.sum(torch.mul(rh_challenge_rois, outputs['rh_f_pred'][:,:,:len(self.roi_name_maps[self.rois_ind])]), dim=2)
+
+            if self.readout_res != 'streams_inc':
+
+                outputs['lh_f_pred'] = (1*(lh_rois>0)) * outputs['lh_f_pred']
+                outputs['rh_f_pred'] = (1*(rh_rois>0)) * outputs['rh_f_pred']
+
+                targets['lh_f'] = (1*(lh_rois>0)) * targets['lh_f']
+                targets['rh_f'] = (1*(rh_rois>0)) * targets['rh_f']
+        
+        loss_lh = nn.MSELoss()(outputs['lh_f_pred'], targets['lh_f'])
+        loss_rh = nn.MSELoss()(outputs['rh_f_pred'], targets['rh_f'])
+        #losses = {'loss_mse_fmri': loss_lh+loss_rh}
+
+        loss = loss_lh+loss_rh
+        losses = {'loss_labels': loss}
+        return losses
+    
+
+def main(rank, world_size, args):
+
+    if args.distributed:
+        args.rank = rank
+        args.world_size = world_size
+        utils.init_distributed_mode(args)
+    else:
+        args.gpu = 0
+
+    args.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(args.device)
+    device = torch.device(args.device)
+
+    args.val_perf = 0
+
+    args.subj = format(args.subj, '02')
+    args.data_dir = os.path.join(args.data_dir, 'subj'+args.subj)
+    args.subject_submission_dir = os.path.join(args.parent_submission_dir,
+        'subj'+args.subj)
+    
+    if args.output_path:
+        args.save_dir = args.output_path + f'nsd/{args.backbone_arch}_{args.encoder_arch}/subj_{args.subj}/{args.readout_res}/enc_{args.enc_output_layer}/run_{args.run}/'
+        if (not os.path.exists(args.save_dir)) and (args.gpu == 0):
+            os.makedirs(args.save_dir)
+
+    # Create the submission directory if not existing
+    if not os.path.isdir(args.subject_submission_dir):
+        os.makedirs(args.subject_submission_dir)
+
+    roi_name_maps, lh_challenge_rois, rh_challenge_rois = roi_maps(args.data_dir)
+
+    if args.readout_res == 'visuals':
+        args.rois_ind = 0
+        args.num_queries = 16   # 2*len(roi_name_maps[args.rois_ind])
+
+    elif args.readout_res == 'bodies':
+        args.rois_ind = 1
+        args.num_queries = 16 # 10
+
+    elif args.readout_res == 'faces':
+        args.rois_ind = 2
+        args.num_queries = 16 #12
+
+    elif args.readout_res == 'places':
+        args.rois_ind = 3
+        args.num_queries = 16 #8
+
+    elif args.readout_res == 'words':
+        args.rois_ind = 4
+        args.num_queries = 16 # 12
+
+    elif args.readout_res == 'streams' or args.readout_res == 'streams_inc':
+        args.rois_ind = 5
+        args.num_queries = 16
+
+    elif args.readout_res == 'hemis':
+        args.rois_ind = 5
+        args.num_queries = 2
+
+    args.roi_nums = len(roi_name_maps[args.rois_ind])
+
+    lh_rois = torch.tensor(lh_challenge_rois[args.rois_ind]).to(args.device)  # -1
+    rh_rois = torch.tensor(rh_challenge_rois[args.rois_ind]).to(args.device)  # -1
+
+    lh_challenge_rois_s = []
+    rh_challenge_rois_s = []
+    for i in range(args.roi_nums):
+        lh_challenge_rois_s.append(torch.where(lh_rois == i, 1, 0))
+        rh_challenge_rois_s.append(torch.where(rh_rois == i, 1, 0))
+
+    lh_challenge_rois_s = torch.vstack(lh_challenge_rois_s)
+    rh_challenge_rois_s = torch.vstack(rh_challenge_rois_s)
+
+        
+    args.lh_vs = len(lh_challenge_rois_s[args.rois_ind])
+    args.rh_vs = len(rh_challenge_rois_s[args.rois_ind])
+
+    #train_loader, val_loader = fetch_data_loaders(args)
+    train_loader, val_loader = fetch_dataloaders(args, train='train')
+    test_loader = fetch_dataloaders(args, train='test')
+
+
+ 
+    model = brain_encoder(args) #get_model(args)
+    model = model.cuda() 
+
+    print(model)
+
+    model_ddp = model
+    if args.distributed:
+        model_ddp = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], 
+                                                              find_unused_parameters=True)
+        
+    criterion = SetCriterion()
+    
+    
+    if args.resume:
+        checkpoint = torch.load(args.resume, map_location='cpu')
+        pretrained_dict = checkpoint['model']
+        model.load_state_dict(pretrained_dict)
+        
+        args.best_val_acc = vars(checkpoint['args'])['val_perf'] #checkpoint['val_acc'] #or read it from the   
+        
+        if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
+            
+            train_params = checkpoint['train_params']
+            param_dicts = [ { "params" : [ p for n , p in model.named_parameters() if n in train_params ]}, ] 
+
+            optimizer = torch.optim.AdamW(param_dicts, lr=args.lr,
+                          weight_decay=args.weight_decay)
+            optimizer.load_state_dict(checkpoint['optimizer'])
+        
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
+            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            args.start_epoch = checkpoint['epoch'] + 1
+            
+    else:
+        
+        param_dicts = [ 
+            { "params" : [ p for n , p in model.named_parameters() if p.requires_grad]}, ]  #n not in frozen_params and 
+    
+        train_params = [ n for n , p in model.named_parameters() if p.requires_grad ]  # n not in frozen_params and
+
+        print('\ntrain_params', train_params)
+
+        optimizer = torch.optim.AdamW(param_dicts, lr=args.lr,
+                                      weight_decay=args.weight_decay)
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
+
+        args.start_epoch = 0
+
+    # only for one processs
+    if args.gpu == 0: 
+        if args.wandb_p:
+            os.environ['WANDB_MODE'] = 'online'
+
+            if args.wandb_r:
+                wandb_r = args.wandb_r 
+            else:
+                wandb_r = args.model 
+
+            os.environ["WANDB__SERVICE_WAIT"] = "300"
+            #        settings=wandb.Settings(_service_wait=300)
+            wandb.init(
+                # Set the project where this run will be logged
+                project= args.wandb_p,   
+                # We pass a run name (otherwise it’ll be randomly assigned, like sunshine-lollypop-10)
+                name=wandb_r,  
+
+                # Track hyperparameters and run metadata
+                config={
+                "learning_rate": args.lr,
+                "architecture": f'{args.model}',
+                "epochs": args.epochs,
+                })
+
+        with open(os.path.join(args.save_dir, 'params.txt'), 'w') as f:
+            pprint.pprint(args.__dict__, f, sort_dicts=False)
+        
+        
+        with open(os.path.join(args.save_dir, 'val_results.txt'), 'w') as f:
+            f.write(f'validation results: \n') 
+
+    print("Start training")
+    start_time = time.time()
+    
+    for epoch in range(args.start_epoch, args.epochs):
+            
+        train_stats = train_one_epoch(
+            model_ddp, criterion, train_loader, optimizer, args.device, epoch,
+            args.clip_max_norm)
+        lr_scheduler.step()
+
+
+        # evaluate
+        lh_fmri_val_pred, rh_fmri_val_pred, lh_fmri_val, rh_fmri_val, val_loss = evaluate(model, criterion, val_loader, args, lh_challenge_rois_s, rh_challenge_rois_s)
+
+        # Empty correlation array of shape: (LH vertices)
+        lh_correlation = np.zeros(lh_fmri_val_pred.shape[1])
+        # Correlate each predicted LH vertex with the corresponding ground truth vertex
+        for v in tqdm(range(lh_fmri_val_pred.shape[1])):
+            lh_correlation[v] = corr(lh_fmri_val_pred[:,v], lh_fmri_val[:,v])[0]
+
+        # Empty correlation array of shape: (RH vertices)
+        rh_correlation = np.zeros(rh_fmri_val_pred.shape[1])
+        # Correlate each predicted RH vertex with the corresponding ground truth vertex
+        for v in tqdm(range(rh_fmri_val_pred.shape[1])):
+            rh_correlation[v] = corr(rh_fmri_val_pred[:,v], rh_fmri_val[:,v])[0]
+
+        # Select the correlation results vertices of each ROI
+        roi_names = []
+        lh_roi_correlation = []
+        rh_roi_correlation = []
+        for r1 in range(len(lh_challenge_rois)):
+            for r2 in roi_name_maps[r1].items():
+                if r2[0] != 0: # zeros indicate to vertices falling outside the ROI of interest
+                    roi_names.append(r2[1])
+                    lh_roi_idx = np.where(lh_challenge_rois[r1] == r2[0])[0]
+                    rh_roi_idx = np.where(rh_challenge_rois[r1] == r2[0])[0]
+                    lh_roi_correlation.append(lh_correlation[lh_roi_idx])
+                    rh_roi_correlation.append(rh_correlation[rh_roi_idx])
+        roi_names.append('All vertices')
+        lh_roi_correlation.append(lh_correlation)
+        rh_roi_correlation.append(rh_correlation)
+
+
+        # Create the plot
+        lh_mean_roi_correlation = [np.mean(np.nan_to_num(np.array(lh_roi_correlation[r]), copy=True, nan=0.0, posinf=None, neginf=None))
+            for r in range(len(lh_roi_correlation))]
+        rh_mean_roi_correlation = [np.mean(np.nan_to_num(np.array(rh_roi_correlation[r]), copy=True, nan=0.0, posinf=None, neginf=None))
+            for r in range(len(rh_roi_correlation))]
+
+        val_perf = (lh_mean_roi_correlation[-1] + rh_mean_roi_correlation[-1]) / 2
+
+        print('val_perf:', val_perf) 
+        print('shape of rh_fmri_val_pred', rh_fmri_val_pred.shape)
+        if (args.gpu == 0) and (args.wandb_p): 
+            wandb.log({"val_perf": val_perf})
+
+
+        if args.output_path:
+            # update best validation acc and save best model to output dir
+            if (val_perf > args.val_perf):  
+                args.val_perf = val_perf                
+
+                if args.gpu == 0: 
+                    with open(os.path.join(args.save_dir, 'val_results.txt'), 'a') as f:
+                            f.write(f'epoch {epoch}, val_perf: {val_perf} \n') 
+
+                if args.save_model:
+                    checkpoint_paths = [args.save_dir + '/checkpoint.pth']
+                    # print('checkpoint_path:',  checkpoint_paths)
+                    for checkpoint_path in checkpoint_paths:
+                        utils.save_on_master({
+                            'model': model.state_dict(),
+                            'optimizer': optimizer.state_dict(),
+    #                         'train_params' : train_params,
+                            'lr_scheduler': lr_scheduler.state_dict(),
+                            'epoch': epoch,
+                            'args': args,
+                            'val_perf': args.val_perf
+                        }, checkpoint_path)
+
+                np.save(args.save_dir+'lh_fmri_val_pred.npy', lh_fmri_val_pred)
+                np.save(args.save_dir+'rh_fmri_val_pred.npy', rh_fmri_val_pred)
+
+                lh_fmri_test_pred, rh_fmri_test_pred = test(model, criterion, test_loader, args, lh_challenge_rois_s, rh_challenge_rois_s)
+
+                lh_fmri_test_pred = lh_fmri_test_pred.astype(np.float32)
+                rh_fmri_test_pred = rh_fmri_test_pred.astype(np.float32)
+
+                np.save(args.save_dir+'/lh_pred_test.npy', lh_fmri_test_pred)
+                np.save(args.save_dir+'/rh_pred_test.npy', rh_fmri_test_pred)
+
+    destroy_process_group()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser('model training and evaluation script', parents=[get_args_parser()])
+    args = parser.parse_args()
+    if args.output_path:
+        Path(args.output_path).mkdir(parents=True, exist_ok=True)
+
+    if args.distributed:
+        args.world_size = torch.cuda.device_count()
+        mp.spawn(main, args=(args.world_size, args), nprocs=args.world_size)
+    else:
+        main(0, 1, args)
