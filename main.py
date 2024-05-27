@@ -1,7 +1,6 @@
 import os, argparse, time, glob, pickle, subprocess, shlex, io, pprint
 
 import numpy as np
-import pandas
 from tqdm import tqdm
 
 import torch
@@ -17,9 +16,6 @@ from torch.distributed import init_process_group, destroy_process_group
 from datasets.nsd_utils import roi_maps
 from datasets.nsd import fetch_dataloaders
 from scipy.stats import pearsonr as corr
-
-from models.cornet import get_cornet_model
-from models.blt import get_blt_model
 
 from models.brain_encoder import brain_encoder
 from engine import train_one_epoch, evaluate, test
