@@ -1,7 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
-"""
-Backbone modules.
-"""
+
 from collections import OrderedDict
 
 import torch
@@ -18,7 +15,6 @@ from utils.utils import NestedTensor
 from .position_encoding import build_position_encoding
 from typing import Dict, Iterable, Callable
 
-from models.cornet import get_cornet_model
 from models.resnet import resnet_model
 from models.dino import dino_model, dino_model_with_hooks
 
@@ -47,9 +43,6 @@ def build_backbone(args):
     if 'resnet' in args.backbone_arch: 
         backbone = resnet_model(args.backbone_arch, train_backbone, return_interm_layers, args.dilation)
         num_channels = backbone.num_channels
-    elif 'cornet' in args.backbone_arch:
-        backbone = get_cornet_model(args.backbone_arch[-1]) 
-        num_channels = 512
     elif args.backbone_arch == 'dinov2':
         backbone = dino_model(-1*args.enc_output_layer, return_interm_layers)
         num_channels = backbone.num_channels

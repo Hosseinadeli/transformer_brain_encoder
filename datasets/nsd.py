@@ -227,7 +227,8 @@ def fetch_dataloaders(args, train='train', shuffle=True, train_val_split='none',
         if args.run < 20:
             np.random.shuffle(idxs)
 
-        #np.save(args.save_dir+ '/idxs.npy', idxs)
+        if args.output_path:
+            np.save(args.save_dir+ '/idxs.npy', idxs)
         
         # Assign 90% of the shuffled stimulus images to the training partition,
         # and 10% to the test partition

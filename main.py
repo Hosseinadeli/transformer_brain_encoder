@@ -460,7 +460,8 @@ def main(rank, world_size, args):
                 np.save(args.save_dir+'/lh_pred_test.npy', lh_fmri_test_pred)
                 np.save(args.save_dir+'/rh_pred_test.npy', rh_fmri_test_pred)
 
-    destroy_process_group()
+    if args.distributed:
+        destroy_process_group()
 
 
 if __name__ == '__main__':

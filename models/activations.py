@@ -1,8 +1,6 @@
 
-
 import numpy as np
 import torch
-
 
 from models.cornet import get_cornet_model
 from models.resnet import resnet_model
@@ -178,10 +176,6 @@ def get_transformer_activations(model, ims, enc_layers, dec_layers):
 
     return enc_output, enc_attn_weights, dec_output, dec_attn_weights
 
-
-def get_activations(model):
-
-    return 0
 
 def get_activations_pretrained(model_name, layer_index, return_interm_layers):
 
