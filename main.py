@@ -466,8 +466,9 @@ if __name__ == '__main__':
     if args.output_path:
         Path(args.output_path).mkdir(parents=True, exist_ok=True)
 
-    if args.distributed:
-        args.world_size = torch.cuda.device_count()
-        mp.spawn(main, args=(args.world_size, args), nprocs=args.world_size)
-    else:
-        main(0, 1, args)
+    # TODO: fix the shuffling issue before enabling distributed training
+    # if args.distributed:
+    #     args.world_size = torch.cuda.device_count()
+    #     mp.spawn(main, args=(args.world_size, args), nprocs=args.world_size)
+    # else:
+    main(0, 1, args)
