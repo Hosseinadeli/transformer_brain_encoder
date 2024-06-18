@@ -106,9 +106,9 @@ def get_args_parser():
                         help='number of data loading num_workers')
     parser.add_argument('--epochs', default=20, type=int,
                         help='number of total epochs to run')
-    parser.add_argument('--batch_size', default=32, type=int,
+    parser.add_argument('--batch_size', default=16, type=int,
                         help='mini-batch size')
-    parser.add_argument('--lr', default=.0001, type=float,
+    parser.add_argument('--lr', default=.0005, type=float,
                         help='initial learning rate')
     parser.add_argument('--weight_decay', default=1e-4, type=float,
                         help='weight decay ')
