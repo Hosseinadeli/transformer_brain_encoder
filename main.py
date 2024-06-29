@@ -55,7 +55,7 @@ def get_args_parser():
     parser.add_argument('--saved_feats', default=None, type=str) #'dinov2q'
     parser.add_argument('--saved_feats_dir', default='../../algonauts_image_features/', type=str) 
     
-    parser.add_argument('--readout_res', choices=['streams_inc', 'visuals', 'bodies', 'faces', 'places','words',
+    parser.add_argument('--readout_res', choices=['voxels', 'streams_inc', 'visuals', 'bodies', 'faces', 'places','words',
                                                   'hemis']
                         , default='streams_inc', type=str)   
     
@@ -166,7 +166,7 @@ class SetCriterion(nn.Module):
         # TODO make target not a list 
         targets = targets[0]
         
-        if self.readout_res != 'hemis':
+        if (self.readout_res != 'hemis') and (self.readout_res != 'voxels'):
             lh_rois = self.lh_challenge_rois[self.rois_ind]
             rh_rois = self.rh_challenge_rois[self.rois_ind]
 
@@ -261,6 +261,9 @@ def main(rank, world_size, args):
         args.rois_ind = 5
         args.num_queries = 2
 
+    elif args.readout_res == 'voxels':
+        args.rois_ind = 5
+
     args.roi_nums = len(roi_name_maps[args.rois_ind])
 
     lh_rois = torch.tensor(lh_challenge_rois[args.rois_ind]).to(args.device)  # -1
@@ -279,6 +282,9 @@ def main(rank, world_size, args):
     args.lh_vs = len(lh_challenge_rois_s[args.rois_ind])
     args.rh_vs = len(rh_challenge_rois_s[args.rois_ind])
 
+    if args.readout_res == 'voxels':
+        args.num_queries = args.lh_vs + args.rh_vs
+
     #train_loader, val_loader = fetch_data_loaders(args)
     train_loader, val_loader = fetch_dataloaders(args, train='train')
     test_loader = fetch_dataloaders(args, train='test')
@@ -287,7 +293,8 @@ def main(rank, world_size, args):
  
     model = brain_encoder(args) #get_model(args)
     model = model.cuda() 
-
+    num_parameters =  sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Number of model parameters: {num_parameters}")
     print(model)
 
     model_ddp = model

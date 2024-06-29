@@ -27,9 +27,12 @@ class brain_encoder(nn.Module):
 
         self.enc_layers = args.enc_layers
         self.dec_layers = args.dec_layers
-        
+
+        self.lh_vs = args.lh_vs
+        self.rh_vs = args.rh_vs
+
         self.query_embed = nn.Embedding(self.num_queries, self.hidden_dim)
-            
+
         ### backbone_arch for feature exraction
         self.backbone_model = build_backbone(args)
 
@@ -74,7 +77,15 @@ class brain_encoder(nn.Module):
         hs = self.transformer(input_proj_src, mask, self.query_embed.weight, pos_embed, self.return_interm)
         output_tokens = hs[-1]
 
-        if self.readout_res == 'hemis':
+        if self.readout_res == 'voxels':
+
+            lh_f_pred = self.lh_embed(output_tokens[:,0:self.lh_vs,:])
+            rh_f_pred = self.rh_embed(output_tokens[:,self.lh_vs:,:])
+
+            lh_f_pred = torch.diagonal(lh_f_pred, dim1=-2, dim2=-1)
+            rh_f_pred = torch.diagonal(rh_f_pred, dim1=-2, dim2=-1)
+
+        elif self.readout_res == 'hemis':
 
             lh_f_pred = self.lh_embed(output_tokens[:,0,:])
             rh_f_pred = self.rh_embed(output_tokens[:,1,:])
