@@ -25,6 +25,21 @@ Please cite our work by using the following BibTeX entry.
 ha2366@columbia.edu
 
 
+
+## update July 2024
+
+Instead of using ROI based decoder queries, I am using a query for each voxel so there is no need for brain areas mapping. That means:
+
+- You need a big GPU for this  
+- The model has around 40K decoder tokens (sum of all voxels in the left and the right hemispheres), one for each voxel. So there can be no self-attention operation on the decoder side as the attention matrix would be prohibitively large, just cross attending to the encoder features patches
+- The Batch size would have to be very small, I can only go up to 2 on L40 gpus before running into memory issues. 
+
+It improves accuracy across the board. 
+
+<img src="https://raw.githubusercontent.com/Hosseinadeli/algonauts2023_transformers/main/figures/voxel_level.png" width = 1000> 
+
+
+
 ## Model Architecture
 
 <img src="https://raw.githubusercontent.com/Hosseinadeli/algonauts2023_transformers/main/figures/model_architecture.jpg" width = 1000> 

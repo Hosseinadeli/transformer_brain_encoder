@@ -27,8 +27,8 @@ import os
 from PIL import Image
 Image.warnings.simplefilter('ignore')
 
-np.random.seed(0)
-torch.manual_seed(0)
+# np.random.seed(0)
+# torch.manual_seed(0)
 
 try:
     import wandb
@@ -112,7 +112,7 @@ def get_args_parser():
                         help='initial learning rate')
     parser.add_argument('--weight_decay', default=1e-4, type=float,
                         help='weight decay ')
-    parser.add_argument('--lr_drop', default=200, type=int)
+    parser.add_argument('--lr_drop', default=4, type=int)
     parser.add_argument('--lr_backbone', default=0, type=int)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
@@ -321,7 +321,7 @@ def main(rank, world_size, args):
                           weight_decay=args.weight_decay)
             optimizer.load_state_dict(checkpoint['optimizer'])
         
-            lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop, gamma=0.5)
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             args.start_epoch = checkpoint['epoch'] + 1
             
@@ -336,7 +336,7 @@ def main(rank, world_size, args):
 
         optimizer = torch.optim.AdamW(param_dicts, lr=args.lr,
                                       weight_decay=args.weight_decay)
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop, gamma=0.5)
 
         args.start_epoch = 0
 
@@ -348,7 +348,7 @@ def main(rank, world_size, args):
             if args.wandb_r:
                 wandb_r = args.wandb_r 
             else:
-                wandb_r = args.model 
+                wandb_r = args.encoder_arch 
 
             os.environ["WANDB__SERVICE_WAIT"] = "300"
             #        settings=wandb.Settings(_service_wait=300)
@@ -361,7 +361,7 @@ def main(rank, world_size, args):
                 # Track hyperparameters and run metadata
                 config={
                 "learning_rate": args.lr,
-                "architecture": f'{args.model}',
+                "architecture": f'{args.encoder_arch}',
                 "epochs": args.epochs,
                 })
 
