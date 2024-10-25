@@ -19,6 +19,7 @@ from scipy.stats import pearsonr as corr
 class algonauts_dataset(Dataset):
     def __init__(self, args, is_train, imgs_paths, idxs, transform=None):
         super(algonauts_dataset, self).__init__()
+        self.image_size = args.image_size
         self.imgs_paths = np.array(imgs_paths)[idxs]
         self.transform = transform
         self.is_train = is_train
@@ -77,6 +78,8 @@ class algonauts_dataset(Dataset):
                 
                 img_path = self.imgs_paths[idx]
                 img = Image.open(img_path).convert('RGB')
+                if self.image_size is not None:
+                    img = img.resize((self.image_size, self.image_size))
                 # Preprocess the image and send it to the chosen device ('cpu' or 'cuda')
                 
                 if self.transform:
@@ -134,6 +137,8 @@ class algonauts_dataset(Dataset):
             else:
                 img_path = self.imgs_paths[idx]
                 img = Image.open(img_path).convert('RGB')
+                if self.image_size is not None:
+                    img = img.resize((self.image_size, self.image_size))
                 # Preprocess the image and send it to the chosen device ('cpu' or 'cuda')
                 if self.transform:
                     img = self.transform(img)
@@ -196,14 +201,14 @@ def fetch_dataloaders(args, train='train', shuffle=True, train_val_split='none',
     transform_train = transforms.Compose([
 #         transforms.RandomRotation(degrees=(0, 15)),
 #         transforms.RandomCrop(375),
-#         transforms.Resize((225,225)), # resize the images to 224x24 pixels
+        # transforms.Resize((args.image_size,args.image_size)), # resize the images to 224x24 pixels
         transforms.ToTensor(), # convert the images to a PyTorch tensor
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]) # normalize the images color channels
     ])
     
     transform_val = transforms.Compose([
 #         transforms.RandomCrop(400),
-#         transforms.Resize((225,225)), # resize the images to 224x24 pixels
+        # transforms.Resize((args.image_size,args.image_size)), # resize the images to 224x24 pixels
         transforms.ToTensor(), # convert the images to a PyTorch tensor
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]) # normalize the images color channels
     ])
@@ -214,6 +219,7 @@ def fetch_dataloaders(args, train='train', shuffle=True, train_val_split='none',
     
         # Create lists will all training and test image file names, sorted
         train_img_list = os.listdir(train_img_dir)
+        train_img_list = [f for f in train_img_list if f.endswith('.png')]
         train_img_list.sort()
 
         # rand_seed = 5 #@param
@@ -234,7 +240,11 @@ def fetch_dataloaders(args, train='train', shuffle=True, train_val_split='none',
         # and 10% to the test partition
         idxs_train, idxs_val = idxs[:num_train], idxs[num_train:]
 
-        train_imgs_paths = sorted(list(Path(train_img_dir).iterdir()))
+        #train_imgs_paths = sorted(list(Path(train_img_dir).iterdir()))
+
+        train_imgs_paths = list(Path(train_img_dir).iterdir())
+        train_imgs_paths = [f for f in train_imgs_paths if str(f).endswith('.png')]
+        train_imgs_paths = sorted(train_imgs_paths)
         
         # The DataLoaders contain the ImageDataset class
         train_dataloader = DataLoader(
@@ -252,14 +262,18 @@ def fetch_dataloaders(args, train='train', shuffle=True, train_val_split='none',
     
     elif train == 'test':
         
-        #test_img_dir  = os.path.join(args.data_dir, 'test_split', 'test_images')
+        test_img_dir  = os.path.join(args.data_dir, 'test_split', 'test_images')
         
-        test_img_dir  = os.path.join(args.data_dir, '../nsdsynthetic_stimuli/')
+        #test_img_dir  = os.path.join(args.data_dir, '../nsdsynthetic_stimuli/')
     
         test_img_list = os.listdir(test_img_dir)
+        test_img_list = [f for f in test_img_list if f.endswith('.png')]
         test_img_list.sort()
 
-        test_imgs_paths = sorted(list(Path(test_img_dir).iterdir()))
+        test_imgs_paths = list(Path(test_img_dir).iterdir())
+        test_imgs_paths = [f for f in test_imgs_paths if str(f).endswith('.png')]
+        test_imgs_paths = sorted(test_imgs_paths)
+        
         # No need to shuffle or split the test stimulus images
         idxs_test = np.arange(len(test_img_list))
     

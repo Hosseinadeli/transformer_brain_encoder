@@ -55,12 +55,12 @@ def get_args_parser():
     parser.add_argument('--saved_feats', default=None, type=str) #'dinov2q'
     parser.add_argument('--saved_feats_dir', default='../../algonauts_image_features/', type=str) 
     
-    parser.add_argument('--readout_res', choices=['voxels', 'streams_inc', 'visuals', 'bodies', 'faces', 'places','words',
+    parser.add_argument('--readout_res', choices=['voxels', 'rois_all', 'streams_inc', 'visuals', 'bodies', 'faces', 'places','words',
                                                   'hemis']
                         , default='streams_inc', type=str)   
     
-
-    parser.add_argument('--encoder_arch', choices=['transformer'], 
+    # the model for mapping from backbone image features to fMRI
+    parser.add_argument('--encoder_arch', choices=['transformer', 'linear'], 
                         default='transformer', type=str)
     
     parser.add_argument('--objective', choices=['NSD'],
@@ -71,7 +71,7 @@ def get_args_parser():
                                                     'resnet18', 'resnet50',
                                                     'dinov2_special_token', 'dinov2_q_special_token'],
                         default='dinov2_q', type=str,
-                        help="Name of the convolutional backbone to use")  #resnet50 resnet18 dinov2
+                        help="Name of the backbone to use")  #resnet50 resnet18 dinov2
     
   
     parser.add_argument('--dilation', action='store_true',
@@ -96,7 +96,9 @@ def get_args_parser():
                         help="Number of attention heads inside the transformer's attentions")
     parser.add_argument('--num_queries', default=16, type=int,
                         help="Number of query slots")
-    parser.add_argument('--pre_norm', action='store_true')
+    
+    parser.add_argument('--pre_norm', default=1, type=int,
+                        help="If 1, norm is applied before attention")
     
     parser.add_argument('--enc_output_layer', default=1, type=int,
                     help="Specify the encoder layer that provides the encoder output. default is the last layer")
@@ -104,7 +106,7 @@ def get_args_parser():
     # training parameters
     parser.add_argument('--num_workers', default=4, type=int,
                         help='number of data loading num_workers')
-    parser.add_argument('--epochs', default=20, type=int,
+    parser.add_argument('--epochs', default=10, type=int,
                         help='number of total epochs to run')
     parser.add_argument('--batch_size', default=16, type=int,
                         help='mini-batch size')
@@ -123,7 +125,7 @@ def get_args_parser():
     parser.add_argument('--wandb_r', default=None, type=str)
 
     # dataset parameters
-    parser.add_argument('--image_size', default=224, type=int, 
+    parser.add_argument('--image_size', default=None, type=int, 
                         help='what size should the image be resized to?')
     parser.add_argument('--horizontal_flip', default=True,
                     help='wether to use horizontal flip augmentation')
@@ -139,24 +141,30 @@ def get_args_parser():
 
 
 class SetCriterion(nn.Module):
-    def __init__(self):
+    def __init__(self, lh_challenge_rois, rh_challenge_rois):
         super().__init__()
         self.weight_dict = {'loss_labels': 1}
 
         self.readout_res = args.readout_res
-        roi_name_maps, lh_challenge_rois, rh_challenge_rois = roi_maps(args.data_dir)
-        self.roi_name_maps = roi_name_maps
+        #roi_name_maps, lh_challenge_rois, rh_challenge_rois = roi_maps(args.data_dir)
+        #self.roi_name_maps = roi_name_maps
+
+        self.lh_challenge_rois = lh_challenge_rois
+        self.rh_challenge_rois = rh_challenge_rois
+
+        self.lh_rois_num = lh_challenge_rois.shape[0]
+        self.rh_rois_num = rh_challenge_rois.shape[0]
         
-        self.lh_challenge_rois = torch.tensor(lh_challenge_rois).to(args.device)
-        self.rh_challenge_rois = torch.tensor(rh_challenge_rois).to(args.device)
+        # self.lh_challenge_rois = torch.tensor(lh_challenge_rois).to(args.device)
+        # self.rh_challenge_rois = torch.tensor(rh_challenge_rois).to(args.device)
         
-        args.lh_vs = len(lh_challenge_rois[args.rois_ind])
-        args.rh_vs = len(rh_challenge_rois[args.rois_ind])
+        # args.lh_vs = len(lh_challenge_rois[args.rois_ind])
+        # args.rh_vs = len(rh_challenge_rois[args.rois_ind])
         
         self.rois_ind = args.rois_ind
         
-        self.lh_vs = args.lh_vs 
-        self.rh_v = args.rh_vs 
+        # self.lh_vs = args.lh_vs 
+        # self.rh_v = args.rh_vs 
 
     def forward(self, outputs, targets):
 
@@ -167,25 +175,42 @@ class SetCriterion(nn.Module):
         targets = targets[0]
         
         if (self.readout_res != 'hemis') and (self.readout_res != 'voxels'):
-            lh_rois = self.lh_challenge_rois[self.rois_ind]
-            rh_rois = self.rh_challenge_rois[self.rois_ind]
 
-            lh_challenge_rois = []
-            rh_challenge_rois = []
-            for i in range(len(self.roi_name_maps[self.rois_ind])):
-                lh_challenge_rois.append(torch.where(lh_rois == i, 1, 0))
-                rh_challenge_rois.append(torch.where(rh_rois == i, 1, 0))
+            # for r in args.rois_ind:
 
-            lh_challenge_rois = torch.vstack(lh_challenge_rois)
-            rh_challenge_rois = torch.vstack(rh_challenge_rois)
+            #     #len(roi_name_maps[args.rois_ind])
 
-            lh_challenge_rois = torch.tile(lh_challenge_rois[:,:,None], (1,1,targets['lh_f'].shape[0])).permute(2,1,0)
-            rh_challenge_rois = torch.tile(rh_challenge_rois[:,:,None], (1,1,targets['rh_f'].shape[0])).permute(2,1,0)
+            #     #args.roi_nums = len(roi_name_maps[args.rois_ind])
+
+            #     lh_rois = torch.tensor(self.lh_challenge_rois[r]).to(args.device)  # -1
+            #     rh_rois = torch.tensor(self.rh_challenge_rois[r]).to(args.device)  # -1
+
+            #     lh_challenge_rois_s = []
+            #     rh_challenge_rois_s = []
+            #     for i in range(len(self.roi_name_maps[r])):
+            #         lh_challenge_rois_s.append(torch.where(lh_rois == i, 1, 0))
+            #         rh_challenge_rois_s.append(torch.where(rh_rois == i, 1, 0))
+
+
+            # lh_rois = self.lh_challenge_rois[self.rois_ind]
+            # rh_rois = self.rh_challenge_rois[self.rois_ind]
+
+            # lh_challenge_rois = []
+            # rh_challenge_rois = []
+            # for i in range(len(self.roi_name_maps[self.rois_ind])):
+            #     lh_challenge_rois.append(torch.where(lh_rois == i, 1, 0))
+            #     rh_challenge_rois.append(torch.where(rh_rois == i, 1, 0))
+
+            # lh_challenge_rois = torch.vstack(lh_challenge_rois)
+            # rh_challenge_rois = torch.vstack(rh_challenge_rois)
+
+            lh_challenge_rois = torch.tile(self.lh_challenge_rois[:,:,None], (1,1,targets['lh_f'].shape[0])).permute(2,1,0)
+            rh_challenge_rois = torch.tile(self.rh_challenge_rois[:,:,None], (1,1,targets['rh_f'].shape[0])).permute(2,1,0)
             
-            outputs['lh_f_pred'] = torch.sum(torch.mul(lh_challenge_rois, outputs['lh_f_pred'][:,:,:len(self.roi_name_maps[self.rois_ind])]), dim=2)
-            outputs['rh_f_pred'] = torch.sum(torch.mul(rh_challenge_rois, outputs['rh_f_pred'][:,:,:len(self.roi_name_maps[self.rois_ind])]), dim=2)
+            outputs['lh_f_pred'] = torch.sum(torch.mul(lh_challenge_rois, outputs['lh_f_pred'][:,:,:self.lh_rois_num]), dim=2)
+            outputs['rh_f_pred'] = torch.sum(torch.mul(rh_challenge_rois, outputs['rh_f_pred'][:,:,:self.rh_rois_num]), dim=2)
 
-            if self.readout_res != 'streams_inc':
+            if (self.readout_res != 'streams_inc') and (self.readout_res != 'rois_all'):
 
                 outputs['lh_f_pred'] = (1*(lh_rois>0)) * outputs['lh_f_pred']
                 outputs['rh_f_pred'] = (1*(rh_rois>0)) * outputs['rh_f_pred']
@@ -223,7 +248,7 @@ def main(rank, world_size, args):
         'subj'+args.subj)
     
     if args.output_path:
-        args.save_dir = args.output_path + f'nsd/{args.backbone_arch}_{args.encoder_arch}/subj_{args.subj}/{args.readout_res}/enc_{args.enc_output_layer}/run_{args.run}/'
+        args.save_dir = args.output_path + f'nsd_test/{args.backbone_arch}_{args.encoder_arch}/subj_{args.subj}/{args.readout_res}/enc_{args.enc_output_layer}/run_{args.run}/'
         if (not os.path.exists(args.save_dir)) and (args.gpu == 0):
             os.makedirs(args.save_dir)
 
@@ -264,33 +289,54 @@ def main(rank, world_size, args):
     elif args.readout_res == 'voxels':
         args.rois_ind = 5
 
-    args.roi_nums = len(roi_name_maps[args.rois_ind])
+    elif args.readout_res == 'rois_all':
+        args.rois_ind = [0, 1, 2, 3, 4]
 
-    lh_rois = torch.tensor(lh_challenge_rois[args.rois_ind]).to(args.device)  # -1
-    rh_rois = torch.tensor(rh_challenge_rois[args.rois_ind]).to(args.device)  # -1
 
     lh_challenge_rois_s = []
     rh_challenge_rois_s = []
-    for i in range(args.roi_nums):
-        lh_challenge_rois_s.append(torch.where(lh_rois == i, 1, 0))
-        rh_challenge_rois_s.append(torch.where(rh_rois == i, 1, 0))
+    for r in args.rois_ind:
+
+        #len(roi_name_maps[args.rois_ind])
+        #args.roi_nums = len(roi_name_maps[args.rois_ind])
+
+        lh_rois = torch.tensor(lh_challenge_rois[r]).to(args.device)  # -1
+        rh_rois = torch.tensor(rh_challenge_rois[r]).to(args.device)  # -1
+
+        
+        for i in range(1, len(roi_name_maps[r])):
+            lh_challenge_rois_s.append(torch.where(lh_rois == i, 1, 0))
+            rh_challenge_rois_s.append(torch.where(rh_rois == i, 1, 0))
 
     lh_challenge_rois_s = torch.vstack(lh_challenge_rois_s)
     rh_challenge_rois_s = torch.vstack(rh_challenge_rois_s)
 
-        
-    args.lh_vs = len(lh_challenge_rois_s[args.rois_ind])
-    args.rh_vs = len(rh_challenge_rois_s[args.rois_ind])
+    print('lh_challenge_rois_s.shape:', lh_challenge_rois_s.shape)
+    print('rh_challenge_rois_s.shape:', rh_challenge_rois_s.shape)
+
+    lh_challenge_rois_0 = torch.where(lh_challenge_rois_s.sum(0) == 0, 1, 0)
+    rh_challenge_rois_0 = torch.where(rh_challenge_rois_s.sum(0) == 0, 1, 0)
+
+    lh_challenge_rois_s = torch.cat((lh_challenge_rois_s, lh_challenge_rois_0[None,:]), dim=0)
+    rh_challenge_rois_s = torch.cat((rh_challenge_rois_s, rh_challenge_rois_0[None,:]), dim=0)
+
+    print('lh_challenge_rois_s.shape:', lh_challenge_rois_s.shape)
+    print('rh_challenge_rois_s.shape:', rh_challenge_rois_s.shape)
+
+    args.lh_vs = lh_challenge_rois_s.shape[1]
+    args.rh_vs = rh_challenge_rois_s.shape[1]   
 
     if args.readout_res == 'voxels':
         args.num_queries = args.lh_vs + args.rh_vs
+    elif args.readout_res == 'rois_all':
+        args.num_queries = lh_challenge_rois_s.shape[0] + rh_challenge_rois_s.shape[0]
+
 
     #train_loader, val_loader = fetch_data_loaders(args)
     train_loader, val_loader = fetch_dataloaders(args, train='train')
     test_loader = fetch_dataloaders(args, train='test')
 
 
- 
     model = brain_encoder(args) #get_model(args)
     model = model.cuda() 
     num_parameters =  sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -302,7 +348,7 @@ def main(rank, world_size, args):
         model_ddp = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], 
                                                               find_unused_parameters=True)
         
-    criterion = SetCriterion()
+    criterion = SetCriterion(lh_challenge_rois_s, rh_challenge_rois_s)
     
     
     if args.resume:

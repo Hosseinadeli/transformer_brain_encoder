@@ -36,8 +36,11 @@ class brain_encoder(nn.Module):
         ### backbone_arch for feature exraction
         self.backbone_model = build_backbone(args)
 
-        if ('resnet' in self.backbone_arch):
+        if ('resnet' in self.backbone_arch) and ('transformer' in self.encoder_arch):
             self.input_proj = nn.Conv2d(self.backbone_model.num_channels, self.hidden_dim, kernel_size=1)
+        elif ('resnet' in self.backbone_arch) and ('linear' in self.encoder_arch):
+            self.input_proj = nn.AdaptiveAvgPool2d(1)
+            self.linear_feature_dim = self.backbone_model.num_channels
 
         # linear readout layers to the neural data
         self.readout_res = args.readout_res
@@ -72,31 +75,40 @@ class brain_encoder(nn.Module):
         # if backbone is resnet, apply 1x1 conv to project the feature to the transformer dimension
         if 'resnet' in self.backbone_arch:
             input_proj_src = self.input_proj(input_proj_src)
+
  
-        #if self.encoder_arch == 'transformer':
-        hs = self.transformer(input_proj_src, mask, self.query_embed.weight, pos_embed, self.return_interm)
-        output_tokens = hs[-1]
+        # print('input_proj_src.shape:', input_proj_src.shape)
+        # print('mask.shape:', mask.shape)
+        # print(mask)
+        # print('pos_embed.shape:', pos_embed.shape)
 
-        if self.readout_res == 'voxels':
+        if self.encoder_arch == 'transformer':
+            hs = self.transformer(input_proj_src, mask, self.query_embed.weight, pos_embed, self.return_interm)
+            output_tokens = hs[-1]
 
-            lh_f_pred = self.lh_embed(output_tokens[:,0:self.lh_vs,:])
-            rh_f_pred = self.rh_embed(output_tokens[:,self.lh_vs:,:])
+            if self.readout_res == 'voxels':
 
-            lh_f_pred = torch.diagonal(lh_f_pred, dim1=-2, dim2=-1)
-            rh_f_pred = torch.diagonal(rh_f_pred, dim1=-2, dim2=-1)
+                lh_f_pred = self.lh_embed(output_tokens[:,0:self.lh_vs,:])
+                rh_f_pred = self.rh_embed(output_tokens[:,self.lh_vs:,:])
 
-        elif self.readout_res == 'hemis':
+                lh_f_pred = torch.diagonal(lh_f_pred, dim1=-2, dim2=-1)
+                rh_f_pred = torch.diagonal(rh_f_pred, dim1=-2, dim2=-1)
 
-            lh_f_pred = self.lh_embed(output_tokens[:,0,:])
-            rh_f_pred = self.rh_embed(output_tokens[:,1,:])
+            elif self.readout_res == 'hemis':
+                lh_f_pred = self.lh_embed(output_tokens[:,0,:])
+                rh_f_pred = self.rh_embed(output_tokens[:,1,:])
 
-        else:
+            else:
+                lh_f_pred = self.lh_embed(output_tokens[:,:25,:])
+                lh_f_pred = torch.movedim(lh_f_pred, 1,-1)
 
-            lh_f_pred = self.lh_embed(output_tokens[:,:8,:])
-            lh_f_pred = torch.movedim(lh_f_pred, 1,-1)
+                rh_f_pred = self.rh_embed(output_tokens[:,25:,:])
+                rh_f_pred = torch.movedim(rh_f_pred, 1,-1)
 
-            rh_f_pred = self.rh_embed(output_tokens[:,8:,:])
-            rh_f_pred = torch.movedim(rh_f_pred, 1,-1)
+        elif self.encoder_arch == 'linear':
+            output_tokens = input_proj_src.squeeze()
+            lh_f_pred = self.lh_embed(output_tokens)
+            rh_f_pred = self.rh_embed(output_tokens)
 
 
         out = {'lh_f_pred': lh_f_pred, 'rh_f_pred': rh_f_pred, 'output_tokens': output_tokens}

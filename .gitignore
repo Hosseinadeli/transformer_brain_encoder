@@ -1,3 +1,4 @@
 wandb/
 results/
+saved_image_features/
 __pycache__

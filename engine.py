@@ -67,7 +67,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(model, criterion, data_loader, args, lh_challenge_rois=None, rh_challenge_rois=None):
+def evaluate(model, criterion, data_loader, args,  lh_challenge_rois=None, rh_challenge_rois=None):
     model.eval()
     criterion.eval()
 
@@ -102,8 +102,8 @@ def evaluate(model, criterion, data_loader, args, lh_challenge_rois=None, rh_cha
         rh_f_pred = outputs['rh_f_pred']
         
         if (args.readout_res != 'hemis') and (args.readout_res != 'voxels'):
-            lh_f_pred = outputs['lh_f_pred'][:,:,:args.roi_nums]
-            rh_f_pred = outputs['rh_f_pred'][:,:,:args.roi_nums]
+            lh_f_pred = outputs['lh_f_pred'][:,:,:lh_challenge_rois.shape[0]]
+            rh_f_pred = outputs['rh_f_pred'][:,:,:rh_challenge_rois.shape[0]]
         
             lh_challenge_rois_b = torch.tile(lh_challenge_rois[:,:,None], (1,1,lh_f_pred.shape[0])).permute(2,1,0)
             rh_challenge_rois_b = torch.tile(rh_challenge_rois[:,:,None], (1,1,rh_f_pred.shape[0])).permute(2,1,0)
@@ -160,8 +160,8 @@ def test(model, criterion, data_loader, args, lh_challenge_rois, rh_challenge_ro
         rh_f_pred = outputs['rh_f_pred']
         
         if (args.readout_res != 'hemis') and (args.readout_res != 'voxels'):
-            lh_f_pred = outputs['lh_f_pred'][:,:,:args.roi_nums]
-            rh_f_pred = outputs['rh_f_pred'][:,:,:args.roi_nums]
+            lh_f_pred = outputs['lh_f_pred'][:,:,:lh_challenge_rois.shape[0]]
+            rh_f_pred = outputs['rh_f_pred'][:,:,:rh_challenge_rois.shape[0]]
         
             lh_challenge_rois_b = torch.tile(lh_challenge_rois[:,:,None], (1,1,lh_f_pred.shape[0])).permute(2,1,0)
             rh_challenge_rois_b = torch.tile(rh_challenge_rois[:,:,None], (1,1,rh_f_pred.shape[0])).permute(2,1,0)
