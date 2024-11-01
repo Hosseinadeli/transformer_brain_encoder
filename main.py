@@ -106,7 +106,7 @@ def get_args_parser():
     # training parameters
     parser.add_argument('--num_workers', default=4, type=int,
                         help='number of data loading num_workers')
-    parser.add_argument('--epochs', default=10, type=int,
+    parser.add_argument('--epochs', default=15, type=int,
                         help='number of total epochs to run')
     parser.add_argument('--batch_size', default=16, type=int,
                         help='mini-batch size')
@@ -287,11 +287,13 @@ def main(rank, world_size, args):
         args.num_queries = 2
 
     elif args.readout_res == 'voxels':
-        args.rois_ind = 5
+        args.rois_ind = [5]
 
     elif args.readout_res == 'rois_all':
         args.rois_ind = [0, 1, 2, 3, 4]
 
+    # elif args.readout_res == 'rois_all_ul':
+    #     args.rois_ind = [0, 1, 2, 3, 4, 6]
 
     lh_challenge_rois_s = []
     rh_challenge_rois_s = []
@@ -316,6 +318,8 @@ def main(rank, world_size, args):
 
     lh_challenge_rois_0 = torch.where(lh_challenge_rois_s.sum(0) == 0, 1, 0)
     rh_challenge_rois_0 = torch.where(rh_challenge_rois_s.sum(0) == 0, 1, 0)
+
+    print('lh_challenge_rois_0.sum:', lh_challenge_rois_0.sum())
 
     lh_challenge_rois_s = torch.cat((lh_challenge_rois_s, lh_challenge_rois_0[None,:]), dim=0)
     rh_challenge_rois_s = torch.cat((rh_challenge_rois_s, rh_challenge_rois_0[None,:]), dim=0)
@@ -500,6 +504,9 @@ def main(rank, world_size, args):
 
                 np.save(args.save_dir+'lh_fmri_val_pred.npy', lh_fmri_val_pred)
                 np.save(args.save_dir+'rh_fmri_val_pred.npy', rh_fmri_val_pred)
+
+                np.save(args.save_dir+'lh_val_corr.npy', lh_correlation)
+                np.save(args.save_dir+'rh_val_corr.npy', rh_correlation)
 
                 lh_fmri_test_pred, rh_fmri_test_pred = test(model, criterion, test_loader, args, lh_challenge_rois_s, rh_challenge_rois_s)
 

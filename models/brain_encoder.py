@@ -99,10 +99,10 @@ class brain_encoder(nn.Module):
                 rh_f_pred = self.rh_embed(output_tokens[:,1,:])
 
             else:
-                lh_f_pred = self.lh_embed(output_tokens[:,:25,:])
+                lh_f_pred = self.lh_embed(output_tokens[:,:output_tokens.shape[1]//2,:])
                 lh_f_pred = torch.movedim(lh_f_pred, 1,-1)
 
-                rh_f_pred = self.rh_embed(output_tokens[:,25:,:])
+                rh_f_pred = self.rh_embed(output_tokens[:,output_tokens.shape[1]//2:,:])
                 rh_f_pred = torch.movedim(rh_f_pred, 1,-1)
 
         elif self.encoder_arch == 'linear':

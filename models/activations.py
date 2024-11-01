@@ -47,7 +47,7 @@ def get_transformer_activations(model, ims, enc_layers, dec_layers):
     dec_output = dec_output
     dec_attn_weights = dec_attn_weights
 
-    return enc_output, enc_attn_weights, dec_output, dec_attn_weights
+    return outputs, enc_output, enc_attn_weights, dec_output, dec_attn_weights
 
 
 

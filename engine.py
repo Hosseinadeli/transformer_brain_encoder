@@ -139,6 +139,33 @@ def evaluate(model, criterion, data_loader, args,  lh_challenge_rois=None, rh_ch
 
 
 @torch.no_grad()
+def evaluate_batch(model, samples, readout_res, lh_challenge_rois, rh_challenge_rois):
+    model.eval()
+
+    samples = tuple(samples.cuda())
+    samples = nested_tensor_from_tensor_list(samples)
+
+    outputs = model(samples)
+    
+    lh_f_pred = outputs['lh_f_pred']
+    rh_f_pred = outputs['rh_f_pred']
+    
+    if (readout_res != 'hemis') and (readout_res != 'voxels'):
+        lh_f_pred = outputs['lh_f_pred'][:,:,:lh_challenge_rois.shape[0]]
+        rh_f_pred = outputs['rh_f_pred'][:,:,:rh_challenge_rois.shape[0]]
+    
+        lh_challenge_rois_b = torch.tile(lh_challenge_rois[:,:,None], (1,1,lh_f_pred.shape[0])).permute(2,1,0)
+        rh_challenge_rois_b = torch.tile(rh_challenge_rois[:,:,None], (1,1,rh_f_pred.shape[0])).permute(2,1,0)
+
+        lh_f_pred = torch.sum(torch.mul(lh_challenge_rois_b, lh_f_pred), dim=2)
+        rh_f_pred = torch.sum(torch.mul(rh_challenge_rois_b, rh_f_pred), dim=2)
+        
+        lh_f_pred = lh_f_pred.cpu().numpy()
+        rh_f_pred = rh_f_pred.cpu().numpy()
+        
+    return lh_f_pred, rh_f_pred
+
+@torch.no_grad()
 def test(model, criterion, data_loader, args, lh_challenge_rois, rh_challenge_rois):
     model.eval()
     criterion.eval()
