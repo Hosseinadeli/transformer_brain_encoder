@@ -85,7 +85,7 @@ def roi_masks(readout_res, roi_name_maps, lh_challenge_rois, rh_challenge_rois):
         num_queries = 2
 
     elif readout_res == 'voxels':
-        rois_ind = [5]
+        rois_ind = [0, 1, 2, 3, 4]
 
     elif readout_res == 'rois_all':
         rois_ind = [0, 1, 2, 3, 4]

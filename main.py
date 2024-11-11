@@ -60,7 +60,7 @@ def get_args_parser():
                         , default='streams_inc', type=str)   
     
     # the model for mapping from backbone image features to fMRI
-    parser.add_argument('--encoder_arch', choices=['transformer', 'linear'], 
+    parser.add_argument('--encoder_arch', choices=['transformer', 'linear', 'custom_transformer'], 
                         default='transformer', type=str)
     
     parser.add_argument('--objective', choices=['NSD'],

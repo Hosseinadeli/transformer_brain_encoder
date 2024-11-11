@@ -6,6 +6,7 @@ from utils.utils import (NestedTensor, nested_tensor_from_tensor_list)
 
 from models.backbone import build_backbone
 from models.transformer import build_transformer
+from models.custom_transformer import build_custom_transformer
 
 class brain_encoder(nn.Module):
     def __init__(self, args):
@@ -20,6 +21,9 @@ class brain_encoder(nn.Module):
         ### Brain encoding model
         #if args.encoder_arch == 'transformer':
         self.transformer = build_transformer(args)
+
+        if self.encoder_arch == 'custom_transformer':
+            self.transformer = build_custom_transformer(args)
 
         self.num_queries = args.num_queries
         self.hidden_dim = self.transformer.d_model
@@ -41,6 +45,7 @@ class brain_encoder(nn.Module):
         elif ('resnet' in self.backbone_arch) and ('linear' in self.encoder_arch):
             self.input_proj = nn.AdaptiveAvgPool2d(1)
             self.linear_feature_dim = self.backbone_model.num_channels
+
 
         # linear readout layers to the neural data
         self.readout_res = args.readout_res
@@ -104,6 +109,11 @@ class brain_encoder(nn.Module):
 
                 rh_f_pred = self.rh_embed(output_tokens[:,output_tokens.shape[1]//2:,:])
                 rh_f_pred = torch.movedim(rh_f_pred, 1,-1)
+
+        elif self.encoder_arch == 'custom_transformer':
+
+            hs = self.transformer(input_proj_src, mask, self.query_embed.weight, pos_embed, self.return_interm)
+            output_tokens = hs[-1]
 
         elif self.encoder_arch == 'linear':
             output_tokens = input_proj_src.squeeze()
