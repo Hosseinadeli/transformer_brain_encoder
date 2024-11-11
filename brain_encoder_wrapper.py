@@ -196,7 +196,6 @@ class brain_encoder_wrapper():
             lh_corr_sm = self.lh_corr_sm.unsqueeze(1).expand(-1, outputs_lh.size(1), -1).to(self.device) 
             lh_pred = (lh_corr_sm * outputs_lh).sum(0)  # Element-wise multiplication and summing along the first dimension
             
-            print(lh_corr_sm[:,:,0:10])
             rh_corr_sm = self.rh_corr_sm.unsqueeze(1).expand(-1, outputs_rh.size(1), -1).to(self.device) 
             rh_pred = (rh_corr_sm * outputs_rh).sum(0)
 
