@@ -81,7 +81,6 @@ class brain_encoder(nn.Module):
         if 'resnet' in self.backbone_arch:
             input_proj_src = self.input_proj(input_proj_src)
 
- 
         # print('input_proj_src.shape:', input_proj_src.shape)
         # print('mask.shape:', mask.shape)
         # print(mask)
@@ -114,6 +113,27 @@ class brain_encoder(nn.Module):
 
             hs = self.transformer(input_proj_src, mask, self.query_embed.weight, pos_embed, self.return_interm)
             output_tokens = hs[-1]
+
+            if self.readout_res == 'voxels':
+
+                lh_f_pred = self.lh_embed(output_tokens[:,0:self.lh_vs,:])
+                rh_f_pred = self.rh_embed(output_tokens[:,self.lh_vs:,:])
+
+                lh_f_pred = torch.diagonal(lh_f_pred, dim1=-2, dim2=-1)
+                rh_f_pred = torch.diagonal(rh_f_pred, dim1=-2, dim2=-1)
+
+            elif self.readout_res == 'hemis':
+                lh_f_pred = self.lh_embed(output_tokens[:,0,:])
+                rh_f_pred = self.rh_embed(output_tokens[:,1,:])
+
+            else:
+                lh_f_pred = self.lh_embed(output_tokens[:,:output_tokens.shape[1]//2,:])
+                lh_f_pred = torch.movedim(lh_f_pred, 1,-1)
+
+                rh_f_pred = self.rh_embed(output_tokens[:,output_tokens.shape[1]//2:,:])
+                rh_f_pred = torch.movedim(rh_f_pred, 1,-1)
+
+                
 
         elif self.encoder_arch == 'linear':
             output_tokens = input_proj_src.squeeze()

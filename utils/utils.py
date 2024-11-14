@@ -321,9 +321,19 @@ class NestedTensor(object):
         return str(self.tensors)
 
 
+# def nested_tensor_from_tensor_list(tensor_list: List[Tensor]):
+#     # TODO make this more general
+#     if tensor_list[0].ndim == 3:
+#         return _onnx_nested_tensor_from_tensor_list(tensor_list)
+#     else:
+#         raise ValueError('not supported')
+#     return NestedTensor(tensor, mask)
+
+
 def nested_tensor_from_tensor_list(tensor_list: List[Tensor]):
     # TODO make this more general
     if tensor_list[0].ndim == 3:
+        #print('torchvision._is_tracing()', torchvision._is_tracing())
         if torchvision._is_tracing():
             # nested_tensor_from_tensor_list() does not export well to ONNX
             # call _onnx_nested_tensor_from_tensor_list() instead

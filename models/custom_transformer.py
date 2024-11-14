@@ -13,6 +13,7 @@ from typing import Optional, List
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
+import math
 
 
 class Transformer(nn.Module):
@@ -39,7 +40,7 @@ class Transformer(nn.Module):
         if self.num_decoder_layers > 0:
             decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
                                         dropout, activation, normalize_before)
-            decoder_norm = nn.LayerNorm(d_model)
+            decoder_norm = None # nn.LayerNorm(d_model)
             self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm,
                                               return_intermediate=return_intermediate_dec)
                                           
@@ -117,9 +118,7 @@ class Transformer(nn.Module):
                     
             # sattn = torch.stack(all_s_maps)
             
-        
         # sattn = self.norm1(self.linear1(sattn))     
-        
         
 #             memory_dec, dec_sattn = self.decoder(memory, src_key_padding_mask=mask, pos=pos_embed)
 #         return memory_dec.permute(1, 2, 0).view(bs, c, h, w), memory.permute(1, 2, 0).view(bs, c, h, w)
@@ -131,12 +130,8 @@ class Transformer(nn.Module):
          
         # hs = self.decoder(tgt, memory+pos_embed, memory_key_padding_mask=mask, query_pos=query_embed)
         
-        
-        
         # hs = self.decoder(tgt+query_embed, memory, memory_key_padding_mask=mask,
                   # pos=pos_embed)
-                          
-
 
 class TransformerEncoder(nn.Module):
 
@@ -284,13 +279,84 @@ class TransformerEncoderLayer(nn.Module):
         return self.forward_post(src, src_mask, src_key_padding_mask, pos)
 
 
+class CrossAttention(nn.Module):
+
+    def __init__(self, d_model, nhead, dropout):
+        super().__init__()
+        assert d_model % nhead == 0
+        # key, query, value projections for all heads, but in a batch
+        self.c_attn = nn.Linear(d_model, 3 * d_model)
+        self.k_proj = nn.Linear(d_model, d_model)
+        self.q_proj = nn.Linear(d_model, d_model)
+        self.v_proj = nn.Linear(d_model, d_model)
+        # output projection
+        self.c_proj = nn.Linear(d_model, d_model)
+        # regularization
+        self.attn_dropout = nn.Dropout(dropout)
+        self.resid_dropout = nn.Dropout(dropout)
+        self.n_head = nhead
+        self.d_model = d_model
+        self.dropout = dropout
+
+        print('d_model:', d_model, 'nhead:', nhead)
+        # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
+        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
+        if not self.flash:
+            print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
+            #TODO what is block_size? 
+            block_size = 10
+            # causal mask to ensure that attention is only applied to the left in the input sequence
+            self.register_buffer("bias", torch.tril(torch.ones(block_size, block_size))
+                                        .view(1, 1, block_size, block_size))
+
+    def forward(self, k, q, v):
+        
+        B, T_v, C = v.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        B, T_q, C = q.size()
+
+        self.n_head = 16
+
+        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        # q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
+
+        k = self.k_proj(k)
+        q = self.q_proj(q)
+        v = self.v_proj(v)
+        k = k.view(B, T_v, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        q = q.view(B, T_q, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        v = v.view(B, T_v, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+
+        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+        if 0: #self.flash:
+            #print('we are using flash attention')
+            # efficient attention using Flash Attention CUDA kernels
+            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
+        else:
+            # manual implementation of attention
+            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+            #att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+            att = F.softmax(att, dim=-1)
+            att = self.attn_dropout(att)
+            y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+
+        #print('y.shape:', y.shape) #[32, 16, 50, 48]
+        y = y.transpose(1, 2).contiguous().view(B, T_q, C) # re-assemble all head outputs side by side
+
+        # output projection
+        y = self.resid_dropout(self.c_proj(y))
+        return y
+
+
 class TransformerDecoderLayer(nn.Module):
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False):
         super().__init__()
-        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
-        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        # self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        # self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+
+        self.cross_attn = CrossAttention(d_model, nhead, dropout=dropout)
+
         # Implementation of Feedforward model
         self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.dropout = nn.Dropout(dropout)
@@ -309,38 +375,6 @@ class TransformerDecoderLayer(nn.Module):
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
         return tensor if pos is None else tensor + pos
 
-    #  default
-    def forward_post(self, tgt, memory,
-                     tgt_mask: Optional[Tensor] = None,
-                     memory_mask: Optional[Tensor] = None,
-                     tgt_key_padding_mask: Optional[Tensor] = None,
-                     memory_key_padding_mask: Optional[Tensor] = None,
-                     pos: Optional[Tensor] = None,
-                     query_pos: Optional[Tensor] = None):
-                     
-        
-
-        
-        
-        # cross attention
-        tgt = self.norm1(tgt)
-        tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
-                                   key=self.with_pos_embed(memory, pos),
-                                   value=memory, attn_mask=memory_mask,
-                                   key_padding_mask=memory_key_padding_mask)[0]
-        tgt = tgt + self.dropout2(tgt2)
-        tgt = self.norm2(tgt)
-        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
-        tgt = tgt + self.dropout3(tgt2)
-        tgt = self.norm3(tgt)
-
-        # q = k = self.with_pos_embed(tgt, query_pos)
-        # tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
-        #                       key_padding_mask=tgt_key_padding_mask)[0]
-        # tgt = tgt + self.dropout1(tgt2)
-
-        return tgt
-
 
     def forward_pre(self, tgt, memory,
                     tgt_mask: Optional[Tensor] = None,
@@ -350,20 +384,53 @@ class TransformerDecoderLayer(nn.Module):
                     pos: Optional[Tensor] = None,
                     query_pos: Optional[Tensor] = None):
                     
-        tgt2 = self.norm1(tgt)
+        # for the first layer tgt is zero
+        #tgt2 = self.norm1(tgt)
         
         # q = k = self.with_pos_embed(tgt2, query_pos)
         # tgt2 = self.self_attn(q, k, value=tgt2, attn_mask=tgt_mask,
         #                       key_padding_mask=tgt_key_padding_mask)[0]
         # tgt = tgt + self.dropout1(tgt2)
         # tgt2 = self.norm2(tgt)
+
+        query=self.with_pos_embed(tgt, query_pos) #[50, 32, 768]
+        query = torch.permute(query, [1,0,2]) #[32, 50, 768]
+        key=self.with_pos_embed(memory, pos)  #[961, 32, 768]
+        key = torch.permute(key, [1,0,2]) #[32, 961, 768]
+        value=torch.permute(memory, [1,0,2]) #[961, 32, 768]
+
+        B, T, C = value.size()
+
+        att = (query @ key.transpose(-2, -1)) * (1.0 / math.sqrt(key.size(-1)))
+
+        #att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        att = F.softmax(att, dim=-1)
+        att = self.dropout(att)
+        y = att @ value # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs) torch.Size([32, 50, 961])
         
-        # cross attention
-        tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt2, query_pos),
-                                   key=self.with_pos_embed(memory, pos),
-                                   value=memory, attn_mask=memory_mask,
-                                   key_padding_mask=memory_key_padding_mask)[0]
-        tgt = tgt + self.dropout2(tgt2)
+        #tgt = y.transpose(0, 1) #.contiguous().view(B, T, C) 
+
+        tgt = self.cross_attn(key, query, value).transpose(0, 1)
+
+        #print('tgt.shape:', tgt.shape)  
+        #print('query.shape:', query.shape, 'key.shape:', key.shape, 'value.shape:', value.shape)
+
+        #return tgt.transpose(0, 1)
+
+        # cross attention - torch.Size([50, 32, 768])
+        # tgt = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
+        #                            key=memory,
+        #                            value=memory, attn_mask=memory_mask,
+        #                            key_padding_mask=memory_key_padding_mask)[0]
+        
+
+        # tgt = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
+        #                     key=self.with_pos_embed(memory, pos),
+        #                     value=memory, attn_mask=memory_mask,
+        #                     key_padding_mask=memory_key_padding_mask)[0]
+        
+
+        #tgt = tgt + self.dropout2(tgt2)
         tgt2 = self.norm3(tgt)
         tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt2))))
         tgt = tgt + self.dropout3(tgt2)
@@ -398,7 +465,7 @@ def build_custom_transformer(args):
         num_decoder_layers=args.dec_layers,
         normalize_before=args.pre_norm,
         return_intermediate_enc=True,
-        return_intermediate_dec=True,
+        return_intermediate_dec=False,
         enc_output_layer = args.enc_output_layer,
     )
 
