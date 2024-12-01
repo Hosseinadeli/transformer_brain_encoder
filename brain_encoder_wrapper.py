@@ -55,10 +55,11 @@ class brain_encoder_wrapper():
             lh_correlation = []
             rh_correlation = []
             self.models = []
+            self.model_layer = []
             run_on_gpu = 0
             for r in self.runs:
                 for l in self.enc_output_layer:
-                    
+                    self.model_layer.append(l)
                     device = f'cuda:{gpu_ind}' if torch.cuda.is_available() else 'cpu'
                     print(f'Run {r} Backbone Layer {l} Device {device}')
                     model_path = f'{self.results_dir}/nsd_test/{self.arch}/subj_{self.subj}/{self.readout_res}/enc_{l}/run_{r}/'
@@ -78,16 +79,44 @@ class brain_encoder_wrapper():
                 if gpu_ind == gpu_count:
                     break
                 
-            
-            lh_correlation = np.array(lh_correlation)
-            lh_corr_sm = softmax(20*lh_correlation, axis=0)
-            #lh_corr_sm = np.tile(np.expand_dims(lh_corr_sm,1), (1,lh_corr_sm.shape[1],1))
-            self.lh_corr_sm = torch.tensor(lh_corr_sm)
+            # averge the runs for each layer
+            lh_correlation_all = []
+            rh_correlation_all = []
+            for l in np.unique(self.model_layer):
+                l_inds = np.where(np.array(self.model_layer) == l)[0]
+                lh_correlation_l = np.array(lh_correlation)[l_inds]
+                rh_correlation_l = np.array(rh_correlation)[l_inds]
 
-            rh_correlation = np.array(rh_correlation)
-            rh_corr_sm = softmax(20*rh_correlation, axis=0)
+                lh_correlation_l = np.mean(lh_correlation_l, axis=0)
+                rh_correlation_l = np.mean(rh_correlation_l, axis=0)
+
+                lh_correlation_all.append(lh_correlation_l)
+                rh_correlation_all.append(rh_correlation_l)
+
+            # apply softmax to the correlations across layers 
+            lh_correlation = np.array(lh_correlation_all)
+            lh_corr_sm = softmax(40*lh_correlation, axis=0)
+            #lh_corr_sm = np.tile(np.expand_dims(lh_corr_sm,1), (1,lh_corr_sm.shape[1],1))
+            
+            rh_correlation = np.array(rh_correlation_all)
+            rh_corr_sm = softmax(40*rh_correlation, axis=0)
+
+            print('lh_corr_sm', lh_corr_sm.shape)
+
+            # expand the softmaxed weights to the number of runs
+            lh_corr_sm_all = []
+            rh_corr_sm_all = []
+            for l in self.model_layer:
+                l_ind = np.where(np.unique(self.model_layer) == l)[0][0]
+                lh_corr_sm_all.append(lh_corr_sm[l_ind])
+                rh_corr_sm_all.append(rh_corr_sm[l_ind])
+                
             #rh_corr_sm = np.tile(np.expand_dims(rh_corr_sm,1), (1,rh_corr_sm.shape[1],1))
-            self.rh_corr_sm = torch.tensor(rh_corr_sm)
+
+            self.lh_corr_sm = torch.tensor(lh_corr_sm_all)
+            self.rh_corr_sm = torch.tensor(rh_corr_sm_all)
+
+            print('lh_corr_sm', self.lh_corr_sm.shape)
 
             self.output_type = output_type
 
@@ -140,7 +169,7 @@ class brain_encoder_wrapper():
         model_features = {}
         if self.model is not None:
             outputs, enc_output, enc_attn_weights, dec_output, dec_attn_weights = \
-                self.extract_transformer_features(self.model, images)
+                self.extract_transformer_features(self.model.to(self.device), images.to(self.device))
             
             #print('dec_attn_weights', len(dec_attn_weights), dec_attn_weights[0].shape)
             
@@ -152,20 +181,24 @@ class brain_encoder_wrapper():
 
         else:
             dec_attn_weights_all = []
-            for enc_output_layer in self.enc_output_layer:
-                for run in self.runs:
-                    print(f'Run {run}')
-                    #subj = format(self.subj, '02')
-                    model_path = f'{self.results_dir}/nsd_test/{self.arch}/subj_{self.subj}/{self.readout_res}/enc_{enc_output_layer}/run_{run}/'
-                    model, _ = self.load_model_path(model_path)  
+            for model in self.models:
+                _, _, _, _, dec_attn_weights = \
+                        self.extract_transformer_features(model, images.to(model.device))
 
-                    _, _, _, _, dec_attn_weights = \
-                        self.extract_transformer_features(model, images.to(self.device))
+                dec_attn_weights_all.append(dec_attn_weights[0].detach().cpu().numpy()) 
 
-                    dec_attn_weights_all.append(dec_attn_weights[0].detach().cpu().numpy()) 
+            # for enc_output_layer in self.enc_output_layer:
+            #     for run in self.runs:
+            #         print(f'Run {run}')
+            #         #subj = format(self.subj, '02')
+            #         model_path = f'{self.results_dir}/nsd_test/{self.arch}/subj_{self.subj}/{self.readout_res}/enc_{enc_output_layer}/run_{run}/'
+            #         model, _ = self.load_model_path(model_path)  
 
-                    del model
-
+            #         _, _, _, _, dec_attn_weights = \
+            #             self.extract_transformer_features(model.to(self.device), images.to(self.device))
+                    
+            #         dec_attn_weights_all.append(dec_attn_weights[0].detach().cpu().numpy()) 
+            #         del model
 
             model_features['dec_attn_weights'] = dec_attn_weights_all
     

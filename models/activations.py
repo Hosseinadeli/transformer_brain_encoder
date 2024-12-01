@@ -1,8 +1,4 @@
 
-import numpy as np
-
-
-from models.dino import dino_model, dino_model_with_hooks
 
 
 def get_transformer_activations(model, ims, enc_layers, dec_layers):
