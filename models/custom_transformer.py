@@ -319,8 +319,8 @@ class CrossAttention(nn.Module):
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         # q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
 
-        #k = self.k_proj(k)
-        #q = self.q_proj(q)
+        k = self.k_proj(k)
+        q = self.q_proj(q)
         #v = self.v_proj(v)
         k = k.view(B, T_v, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = q.view(B, T_q, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -396,6 +396,7 @@ class TransformerDecoderLayer(nn.Module):
         query=self.with_pos_embed(tgt, query_pos) #[50, 32, 768]
         query = torch.permute(query, [1,0,2]) #[32, 50, 768]
         key=self.with_pos_embed(memory, pos)  #[961, 32, 768]
+        #key = memory
         key = torch.permute(key, [1,0,2]) #[32, 961, 768]
         value=torch.permute(memory, [1,0,2]) #[961, 32, 768]
 

@@ -36,7 +36,7 @@ Instead of using ROI based decoder queries, I am using a query for each voxel so
 
 It improves accuracy across the board. 
 
-<img src="https://raw.githubusercontent.com/Hosseinadeli/algonauts2023_transformers/main/figures/voxel_level.png" width = 1000> 
+<img src="https://raw.githubusercontent.com/Hosseinadeli/algonauts2023_transformers/main/figures/subj_1_voxels_ensemble.png" width = 1000> 
 
 
 

@@ -476,8 +476,11 @@ def main(rank, world_size, args):
         print('val_perf:', val_perf) 
         print('shape of rh_fmri_val_pred', rh_fmri_val_pred.shape)
         if (args.gpu == 0) and (args.wandb_p): 
-            wandb.log({"val_perf": val_perf})
-
+            wandb_log = {"val_perf": val_perf}
+            roi_clusters = {'visuals':np.arange(0,7), 'bodies': np.arange(7,11), 'faces':np.arange(11,16), 'places':np.arange(16,19),'words':np.arange(19,24)}
+            for r in roi_clusters.keys():
+                wandb_log[f'{r}'] = np.nanmean(np.array(lh_mean_roi_correlation)[roi_clusters[r]])
+            wandb.log(wandb_log)
 
         if args.output_path:
             # update best validation acc and save best model to output dir

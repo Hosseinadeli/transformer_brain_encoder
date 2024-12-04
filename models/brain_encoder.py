@@ -86,6 +86,8 @@ class brain_encoder(nn.Module):
         # print(mask)
         # print('pos_embed.shape:', pos_embed.shape)
 
+        # pos_embed = torch.zeros_like(pos_embed).to(pos_embed.device)
+
         if self.encoder_arch == 'transformer':
             hs = self.transformer(input_proj_src, mask, self.query_embed.weight, pos_embed, self.return_interm)
             output_tokens = hs[-1]
