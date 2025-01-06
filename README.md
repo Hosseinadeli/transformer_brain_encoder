@@ -49,22 +49,24 @@ It improves accuracy across the board.
 You can train the model using the code below. 
 
 ```bash
-python main.py --run 1  --subj 1 --enc_output_layer 1 --readout_res 'streams_inc'
+python main.py --run 1  --subj 1 --enc_output_layer 1 --readout_res 'rois_all'
 ```
 The model can accept many parameters for the run. Here the run number is given, the subject number, which encoder layer output should be fed to the decoder ([-1] in this case), and what type of queries should the transformer decoder be using. 
 
-With 'streams_inc', all the vertices are predicted using queries for all the streams. You can use the visualize_results.ipynb to see the results after they are saved. 
+With 'rois_all', all the vertices are predicted using queries for all the brain areas (so no need for training separate models). You can use the visualize_results.ipynb to see the results after they are saved. 
 
 Results from a sample run for subj 1:
 
 <img src="https://raw.githubusercontent.com/Hosseinadeli/algonauts2023_transformers/main/figures/detr_dino_1_streams_inc_16.png" width = 1000> 
+
+
+
 
 In order to train the model using a lower level features from the encoder and to focus on early visual areas:
 
 ```bash
 python main.py --run 1  --subj 1 --enc_output_layer 8 --readout_res 'visuals'
 ```
-
 
 Results from a sample run for subj 1:
 

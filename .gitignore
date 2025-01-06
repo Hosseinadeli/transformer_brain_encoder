@@ -4,4 +4,5 @@ archive/
 saved_image_features/
 __pycache__
 run_model.ipynb
-Thumbs.db
+*.db
+images/*.db
