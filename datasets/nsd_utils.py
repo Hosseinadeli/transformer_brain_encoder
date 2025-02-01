@@ -6,8 +6,8 @@ import torch
 import os
 from copy import copy
 from matplotlib import pyplot as plt
-import cortex
-import cortex.polyutils
+# import cortex
+# import cortex.polyutils
 
 def roi_maps(data_dir):
     # Load the ROI classes mapping dictionaries

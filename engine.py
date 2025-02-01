@@ -101,7 +101,7 @@ def evaluate(model, criterion, data_loader, args,  lh_challenge_rois=None, rh_ch
         lh_f_pred = outputs['lh_f_pred']
         rh_f_pred = outputs['rh_f_pred']
         
-        if (args.readout_res != 'hemis') and (args.readout_res != 'voxels'):
+        if (args.encoder_arch != 'linear') and (args.readout_res != 'hemis') and (args.readout_res != 'voxels'):
             lh_f_pred = outputs['lh_f_pred'][:,:,:lh_challenge_rois.shape[0]]
             rh_f_pred = outputs['rh_f_pred'][:,:,:rh_challenge_rois.shape[0]]
         
@@ -198,7 +198,7 @@ def test(model, criterion, data_loader, args, lh_challenge_rois, rh_challenge_ro
         lh_f_pred = outputs['lh_f_pred']
         rh_f_pred = outputs['rh_f_pred']
         
-        if (args.readout_res != 'hemis') and (args.readout_res != 'voxels'):
+        if (args.encoder_arch != 'linear') and (args.readout_res != 'hemis') and (args.readout_res != 'voxels'):
             lh_f_pred = outputs['lh_f_pred'][:,:,:lh_challenge_rois.shape[0]]
             rh_f_pred = outputs['rh_f_pred'][:,:,:rh_challenge_rois.shape[0]]
         

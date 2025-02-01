@@ -60,7 +60,9 @@ def get_args_parser():
                         , default='streams_inc', type=str)   
     
     # the model for mapping from backbone image features to fMRI
-    parser.add_argument('--encoder_arch', choices=['transformer', 'linear', 'custom_transformer'], 
+    parser.add_argument('--encoder_arch', choices=['transformer', 'linear', 
+                                                    'custom_transformer',
+                                                    'spatial_feature'], 
                         default='transformer', type=str)
     
     parser.add_argument('--objective', choices=['NSD'],
@@ -114,7 +116,7 @@ def get_args_parser():
                         help='initial learning rate')
     parser.add_argument('--weight_decay', default=1e-4, type=float,
                         help='weight decay ')
-    parser.add_argument('--lr_drop', default=4, type=int)
+    parser.add_argument('--lr_drop', default=100, type=int)
     parser.add_argument('--lr_backbone', default=0, type=int)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
@@ -146,6 +148,7 @@ class SetCriterion(nn.Module):
         self.weight_dict = {'loss_labels': 1}
 
         self.readout_res = args.readout_res
+        self.encoder_arch = args.encoder_arch
         #roi_name_maps, lh_challenge_rois, rh_challenge_rois = roi_maps(args.data_dir)
         #self.roi_name_maps = roi_name_maps
 
@@ -174,35 +177,7 @@ class SetCriterion(nn.Module):
         # TODO make target not a list 
         targets = targets[0]
         
-        if (self.readout_res != 'hemis') and (self.readout_res != 'voxels'):
-
-            # for r in args.rois_ind:
-
-            #     #len(roi_name_maps[args.rois_ind])
-
-            #     #args.roi_nums = len(roi_name_maps[args.rois_ind])
-
-            #     lh_rois = torch.tensor(self.lh_challenge_rois[r]).to(args.device)  # -1
-            #     rh_rois = torch.tensor(self.rh_challenge_rois[r]).to(args.device)  # -1
-
-            #     lh_challenge_rois_s = []
-            #     rh_challenge_rois_s = []
-            #     for i in range(len(self.roi_name_maps[r])):
-            #         lh_challenge_rois_s.append(torch.where(lh_rois == i, 1, 0))
-            #         rh_challenge_rois_s.append(torch.where(rh_rois == i, 1, 0))
-
-
-            # lh_rois = self.lh_challenge_rois[self.rois_ind]
-            # rh_rois = self.rh_challenge_rois[self.rois_ind]
-
-            # lh_challenge_rois = []
-            # rh_challenge_rois = []
-            # for i in range(len(self.roi_name_maps[self.rois_ind])):
-            #     lh_challenge_rois.append(torch.where(lh_rois == i, 1, 0))
-            #     rh_challenge_rois.append(torch.where(rh_rois == i, 1, 0))
-
-            # lh_challenge_rois = torch.vstack(lh_challenge_rois)
-            # rh_challenge_rois = torch.vstack(rh_challenge_rois)
+        if (self.encoder_arch != 'linear') and (self.readout_res != 'hemis') and (self.readout_res != 'voxels'):
 
             lh_challenge_rois = torch.tile(self.lh_challenge_rois[:,:,None], (1,1,targets['lh_f'].shape[0])).permute(2,1,0)
             rh_challenge_rois = torch.tile(self.rh_challenge_rois[:,:,None], (1,1,targets['rh_f'].shape[0])).permute(2,1,0)
@@ -223,6 +198,11 @@ class SetCriterion(nn.Module):
         #losses = {'loss_mse_fmri': loss_lh+loss_rh}
 
         loss = loss_lh+loss_rh
+
+        # add a ridge penalty to the linear model
+        if self.encoder_arch == 'linear':
+            loss = loss + 0.02* outputs['l2_reg']
+
         losses = {'loss_labels': loss}
         return losses
     
@@ -339,7 +319,6 @@ def main(rank, world_size, args):
     #train_loader, val_loader = fetch_data_loaders(args)
     train_loader, val_loader = fetch_dataloaders(args, train='train')
     test_loader = fetch_dataloaders(args, train='test')
-
 
     model = brain_encoder(args) #get_model(args)
     model = model.cuda() 
@@ -493,11 +472,18 @@ def main(rank, world_size, args):
 
                 if args.save_model:
                     checkpoint_paths = [args.save_dir + '/checkpoint.pth']
+
+                    model_state_dict = model.state_dict()
+                    model_state_dict = {
+                                k: v
+                                for k, v in model_state_dict.items()
+                                if "backbone_model" not in k
+                            }
                     # print('checkpoint_path:',  checkpoint_paths)
                     for checkpoint_path in checkpoint_paths:
                         utils.save_on_master({
-                            'model': model.state_dict(),
-                            'optimizer': optimizer.state_dict(),
+                            'model': model_state_dict,
+                            # 'optimizer': optimizer.state_dict(),
     #                         'train_params' : train_params,
                             'lr_scheduler': lr_scheduler.state_dict(),
                             'epoch': epoch,
