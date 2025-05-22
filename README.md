@@ -35,16 +35,17 @@ Adeli, H., Minni, S., & Kriegeskorte, N. (2023). Predicting brain activity using
   pages={2023--08},
   year={2023},
   publisher={Cold Spring Harbor Laboratory}
-} -->
+} 
 
 ``` 
+-->
 
 
 ## Model Architecture
 
 <img src="https://raw.githubusercontent.com/Hosseinadeli/transformer_brain_encoder/main/figures/arch.png" width = 1000> 
 
-A. Brain encoder architecture. The input patches are first encoded using a frozen backbone model. The features are then mapped using a transformer decoder to brain responses. B. The cross attention mechanism showing how learned queries for each ROI can route only the relevant tokens to predict the vertices in the corresponding ROI.
+**A.** Brain encoder architecture. The input patches are first encoded using a frozen backbone model. The features are then mapped using a transformer decoder to brain responses. **B.** The cross attention mechanism showing how learned queries for each ROI can route only the relevant tokens to predict the vertices in the corresponding ROI.
 
 ## Training the model
 
@@ -61,7 +62,7 @@ Results for subj 1 showing the differnce between the ROI-based transformer model
 
 <img src="https://raw.githubusercontent.com/Hosseinadeli/transformer_brain_encoder/main/figures/rois.png" width = 1000> 
 
-A. The general region of interest for highly visually responsive vertices in the back of the brain shown on different surface maps. B. Encoding accuracy (fraction of explained variance) shown for Subject 1 for all the vertices for the transformer model using ROIs for decoder queries. C. Encoding accuracy for individual ROIs and for ROI clusters based on category selectivity for the two hemispheres. D. The differences in encoding accuracy between the transformer and the ridge regression models showing that improvement in the former is driven by better prediction of higher visual areas.
+**A.** The general region of interest for highly visually responsive vertices in the back of the brain shown on different surface maps. **B.** Encoding accuracy (fraction of explained variance) shown for Subject 1 for all the vertices for the transformer model using ROIs for decoder queries. **C.** Encoding accuracy for individual ROIs and for ROI clusters based on category selectivity for the two hemispheres. **D.** The differences in encoding accuracy between the transformer and the ridge regression models showing that improvement in the former is driven by better prediction of higher visual areas.
 
 
 ## Attention maps
