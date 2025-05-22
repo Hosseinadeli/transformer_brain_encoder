@@ -2,8 +2,43 @@
 
 # Transformer brain encoder 
 
-Transformer brain encoders explain human high-level visual responses (https://hosseinadeli.github.io/)
+Transformer brain encoders explain human high-level visual responses 
 
+A major goal of neuroscience is to understand brain computations during
+visual processing in naturalistic settings. A dominant approach is to use
+image-computable deep neural networks trained with different task objectives as
+a basis for linear encoding models. However, in addition to requiring tuning a
+large number of parameters, the linear encoding approach ignores the structure
+of the feature maps both in the brain and the models. Recently proposed
+alternatives have focused on decomposing the linear mapping to spatial and
+feature components but focus on finding static receptive fields for units that
+are applicable only in early visual areas. In this work, we employ the
+attention mechanism used in the transformer architecture to study how
+retinotopic visual features can be dynamically routed to category-selective
+areas in high-level visual processing. We show that this computational motif is
+significantly more powerful than alternative methods in predicting brain
+activity during natural scene viewing, across different feature basis models
+and modalities. We also show that this approach is inherently more
+interpretable, without the need to create importance maps, by interpreting the
+attention routing signal for different high-level categorical areas. Our
+approach proposes a mechanistic model of how visual information from
+retinotopic maps can be routed based on the relevance of the input content to
+different category-selective regions.
+
+
+
+Adeli, H., Minni, S., & Kriegeskorte, N. (2023). Predicting brain activity using Transformers. bioRxiv, 2023-08. [[bioRxiv](https://www.biorxiv.org/content/10.1101/2023.08.02.551743v1.abstract)]
+
+``` bibtex
+@article{adeli2023predicting,
+  title={Predicting brain activity using Transformers},
+  author={Adeli, Hossein and Minni, Sun and Kriegeskorte, Nikolaus},
+  journal={bioRxiv},
+  pages={2023--08},
+  year={2023},
+  publisher={Cold Spring Harbor Laboratory}
+}
+``` 
 
 [Hossein Adeli](https://hosseinadeli.github.io/)<br />
 ha2366@columbia.edu
@@ -21,13 +56,17 @@ python main.py --run 1  --subj 1 --enc_output_layer 1 --readout_res 'rois_all'
 ```
 Here the run number is given, the subject number, which encoder layer output should be fed to the decoder ([-1] in this case), and what type of queries should the transformer decoder be using. 
 
-With 'rois_all', all the vertices are predicted using queries for all the brain areas (so no need for training separate models). You can use the visualize_results.ipynb to see the results after they are saved. 
+With 'rois_all', the routing is based on ROIs. You can use the visualize_results.ipynb to see the results after they are saved. 
 
-Results from a sample run for subj 1:
+Results for subj 1 showing the differnce between the ROI-based transformer model and the regression model:
 
 <img src="https://raw.githubusercontent.com/Hosseinadeli/transformer_brain_encoder/main/figures/rois.png" width = 1000> 
 
 
+
+## Attention maps
+
+<img src="https://raw.githubusercontent.com/Hosseinadeli/transformer_brain_encoder/main/figures/att.png" width = 700> 
 
 ### References 
 
@@ -40,6 +79,7 @@ username: hosseinadeli
 
 Adeli, H., Minni, S., & Kriegeskorte, N. (2023). Predicting brain activity using Transformers. bioRxiv, 2023-08. [[bioRxiv](https://www.biorxiv.org/content/10.1101/2023.08.02.551743v1.abstract)]
 
+<!-- 
 ``` bibtex
 @article{adeli2023predicting,
   title={Predicting brain activity using Transformers},
@@ -49,15 +89,8 @@ Adeli, H., Minni, S., & Kriegeskorte, N. (2023). Predicting brain activity using
   year={2023},
   publisher={Cold Spring Harbor Laboratory}
 }
-``` 
- 
+```  -->
 
-
-## Attention maps
-
-
-
-<img src="https://raw.githubusercontent.com/Hosseinadeli/transformer_brain_encoder/main/figures/att.png" width = 700> 
 
 <!-- ### Repo map
 
