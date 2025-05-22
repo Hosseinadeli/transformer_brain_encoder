@@ -4,6 +4,6 @@ archive/
 saved_image_features/
 __pycache__
 *.db
-images/*.db
 extract_features.ipynb
-images
+images/
+utils_for_vis.ipynb
