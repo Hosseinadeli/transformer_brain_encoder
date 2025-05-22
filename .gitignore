@@ -3,7 +3,6 @@ results/
 archive/
 saved_image_features/
 __pycache__
-*.db
 extract_features.ipynb
 images/
 utils_for_vis.ipynb
