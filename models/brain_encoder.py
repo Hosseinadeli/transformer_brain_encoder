@@ -49,6 +49,9 @@ class brain_encoder(nn.Module):
         
         elif self.encoder_arch == 'spatial_feature':
 
+            if 'clip' in self.backbone_arch:
+                self.map_size = 16
+
             self.spatial_embed = nn.Embedding(self.num_queries, self.map_size*self.map_size)
             self.linear_feature_dim = self.backbone_model.num_channels
 
@@ -58,6 +61,9 @@ class brain_encoder(nn.Module):
                 if 'resnet' in self.backbone_arch:
                     stride=1
                     self.map_size = 11
+                elif 'clip' in self.backbone_arch:
+                    stride=1
+                    self.map_size = 8
                 else:
                     stride=3
                     self.map_size = 11
@@ -71,22 +77,30 @@ class brain_encoder(nn.Module):
         elif self.encoder_arch == 'linear':
             #TODO hard  coding the map size and hidden dimention for now but fix it
             # using conv to make the input smaller for linear layer
-            self.hidden_dim = 256
+            
             if 'resnet' in self.backbone_arch:
+                self.hidden_dim = 256
                 stride=1
                 self.map_size = 11
+            elif 'clip' in self.backbone_arch:
+                self.hidden_dim = 256
+                stride=2
+                self.map_size = 8
             else:
+                self.hidden_dim = 256
                 stride=3
                 self.map_size = 11
 
             #if 'dino' in self.backbone_arch:
             self.input_proj = nn.Conv2d(self.backbone_model.num_channels, self.hidden_dim, kernel_size=3, stride=stride, padding=1)
                 
-
-                
             # if ('resnet' in self.backbone_arch):
             #     self.input_proj = nn.AdaptiveAvgPool2d(1)
-            self.linear_feature_dim = self.hidden_dim*self.map_size*self.map_size
+            if 'cls' in self.backbone_arch:
+                self.hidden_dim = 768
+                self.linear_feature_dim  = self.hidden_dim
+            else:
+                self.linear_feature_dim = self.hidden_dim*self.map_size*self.map_size
 
         #what is the readout resolution - hemispheres, rois, voxels
         self.readout_res = args.readout_res
@@ -105,18 +119,23 @@ class brain_encoder(nn.Module):
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
 
-        # if self.backbone_arch:
-        if self.lr_backbone == 0:
-            with torch.no_grad():
-                features, pos = self.backbone_model(samples)
-        else:
-            features, pos = self.backbone_model(samples)
 
+
+        if 'cls' in self.backbone_arch:
+            with torch.no_grad():
+                input_proj_src = self.backbone_model(samples)
+
+        else:
+            if self.lr_backbone == 0:
+                with torch.no_grad():
+                    features, pos = self.backbone_model(samples)
+            else:
+                features, pos = self.backbone_model(samples)
         
-        input_proj_src, mask = features[-1].decompose()
-        assert mask is not None
-        pos_embed = pos[-1]
-        _,_,h,w = pos_embed.shape
+            input_proj_src, mask = features[-1].decompose()
+            assert mask is not None
+            pos_embed = pos[-1]
+            _,_,h,w = pos_embed.shape
 
 
         # print('input_proj_src.shape:', input_proj_src.shape)
@@ -219,7 +238,9 @@ class brain_encoder(nn.Module):
 
         elif self.encoder_arch == 'linear':
             #if 'dino' in self.backbone_arch:
-            input_proj_src = self.input_proj(input_proj_src)
+            if 'cls' not in self.backbone_arch: 
+                input_proj_src = self.input_proj(input_proj_src)
+
             output_tokens = input_proj_src.flatten(1)
             lh_f_pred = self.lh_embed(output_tokens)
             rh_f_pred = self.rh_embed(output_tokens)

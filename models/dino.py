@@ -17,7 +17,7 @@ from .position_encoding import build_position_encoding
     
 class dino_model_with_hooks(nn.Module):
 
-    def __init__(self, enc_output_layer, return_interm_layers= False):
+    def __init__(self, enc_output_layer, return_interm_layers= False, return_cls=False):
         super().__init__()   
         
         self.backbone = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitb14')
@@ -31,6 +31,7 @@ class dino_model_with_hooks(nn.Module):
         self.backbone._modules["blocks"][enc_output_layer]._modules["attn"]._modules["qkv"].register_forward_hook(self.hook_fn_forward_qkv)  #self.hook_fn_forward_qkv())
         
         self.return_interm_layers = return_interm_layers
+        self.return_cls = return_cls
 
     def hook_fn_forward_qkv(self, module, input, output) -> Callable:
 #         def fn(_, __, output):
@@ -60,6 +61,10 @@ class dino_model_with_hooks(nn.Module):
         
         xs = q[:,1:,:]
 
+        if self.return_cls:
+            #out['cls_token'] = q[:,0:1,:]
+            return q[:,0,:]
+
         xs = {'layer_top':xs}
 #         xs = self.body(tensor_list.tensors)
 
@@ -77,7 +82,7 @@ class dino_model_with_hooks(nn.Module):
 
 class dino_model(nn.Module):
 
-    def __init__(self, enc_output_layer, return_interm_layers= False):
+    def __init__(self, enc_output_layer, return_interm_layers= False, return_cls=False):
         super().__init__()   
         
         self.backbone = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitb14')
@@ -88,6 +93,7 @@ class dino_model(nn.Module):
             
         self.enc_output_layer = enc_output_layer
         self.return_interm_layers = return_interm_layers
+        self.return_cls = return_cls
         
 
     def forward(self, tensor_list: NestedTensor):
@@ -104,6 +110,11 @@ class dino_model(nn.Module):
             xs = {'0':xs[0], '1':xs[1], '2':xs[2], '3':xs[3], '4':xs[4], '5':xs[5], '6':xs[6], '7':xs[7], '8':xs[8], '9':xs[9], '10':xs[10], '11':xs[11]}
         else:
             xs = {'layer_top':xs[self.enc_output_layer]}
+            cls_token = xs[self.enc_output_layer][:,0,:]
+
+        # TODO fix this
+        if self.return_cls:
+            return cls_token
 
         out: Dict[str, NestedTensor] = {}
         for name, x in xs.items():

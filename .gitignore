@@ -3,6 +3,7 @@ results/
 archive/
 saved_image_features/
 __pycache__
-run_model.ipynb
 *.db
 images/*.db
+extract_features.ipynb
+images

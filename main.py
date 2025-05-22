@@ -13,7 +13,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
-from datasets.nsd_utils import roi_maps
+from datasets.nsd_utils import roi_maps, roi_masks
 from datasets.nsd import fetch_dataloaders
 from scipy.stats import pearsonr as corr
 
@@ -68,10 +68,14 @@ def get_args_parser():
     parser.add_argument('--objective', choices=['NSD'],
                         default='classification', help='which model to train')
     
+    parser.add_argument('--dataset', choices=['nsd_algo', 'nsd_gen'],
+                        default='nsd_algo', help='which model to train')
+    
     # Backbone
     parser.add_argument('--backbone_arch', choices=[None, 'dinov2', 'dinov2_q', 
                                                     'resnet18', 'resnet50',
-                                                    'dinov2_special_token', 'dinov2_q_special_token'],
+                                                    'dinov2_cls', 'dinov2_q_cls',
+                                                    'clip', 'clip_cls'],
                         default='dinov2_q', type=str,
                         help="Name of the backbone to use")  #resnet50 resnet18 dinov2
     
@@ -149,6 +153,7 @@ class SetCriterion(nn.Module):
 
         self.readout_res = args.readout_res
         self.encoder_arch = args.encoder_arch
+        self.backbone_arch = args.backbone_arch
         #roi_name_maps, lh_challenge_rois, rh_challenge_rois = roi_maps(args.data_dir)
         #self.roi_name_maps = roi_name_maps
 
@@ -164,7 +169,7 @@ class SetCriterion(nn.Module):
         # args.lh_vs = len(lh_challenge_rois[args.rois_ind])
         # args.rh_vs = len(rh_challenge_rois[args.rois_ind])
         
-        self.rois_ind = args.rois_ind
+        # self.rois_ind = args.rois_ind
         
         # self.lh_vs = args.lh_vs 
         # self.rh_v = args.rh_vs 
@@ -200,8 +205,9 @@ class SetCriterion(nn.Module):
         loss = loss_lh+loss_rh
 
         # add a ridge penalty to the linear model
-        if self.encoder_arch == 'linear':
-            loss = loss + 0.02* outputs['l2_reg']
+        if 'cls' not in self.backbone_arch:
+            if self.encoder_arch == 'linear':
+                loss = loss + 0.02* outputs['l2_reg']
 
         losses = {'loss_labels': loss}
         return losses
@@ -221,104 +227,66 @@ def main(rank, world_size, args):
     device = torch.device(args.device)
 
     args.val_perf = 0
-
     args.subj = format(args.subj, '02')
-    args.data_dir = os.path.join(args.data_dir, 'subj'+args.subj)
-    args.subject_submission_dir = os.path.join(args.parent_submission_dir,
-        'subj'+args.subj)
+    args.data_dir = os.path.join(args.data_dir, 'subj'+ args.subj)
     
     if args.output_path:
         args.save_dir = args.output_path + f'nsd_test/{args.backbone_arch}_{args.encoder_arch}/subj_{args.subj}/{args.readout_res}/enc_{args.enc_output_layer}/run_{args.run}/'
         if (not os.path.exists(args.save_dir)) and (args.gpu == 0):
             os.makedirs(args.save_dir)
 
-    # Create the submission directory if not existing
-    if not os.path.isdir(args.subject_submission_dir):
-        os.makedirs(args.subject_submission_dir)
+    if args.dataset == 'nsd_algo':
 
-    roi_name_maps, lh_challenge_rois, rh_challenge_rois = roi_maps(args.data_dir)
+        roi_name_maps, lh_challenge_rois, rh_challenge_rois = roi_maps(args.data_dir)
+        lh_challenge_rois_s, rh_challenge_rois_s, lh_roi_names, rh_roi_names, num_queries \
+            = roi_masks(args.readout_res, roi_name_maps, lh_challenge_rois, rh_challenge_rois)
 
-    if args.readout_res == 'visuals':
-        args.rois_ind = 0
-        args.num_queries = 16   # 2*len(roi_name_maps[args.rois_ind])
+        lh_challenge_rois_s = lh_challenge_rois_s.to(args.device)
+        rh_challenge_rois_s = rh_challenge_rois_s.to(args.device)
 
-    elif args.readout_res == 'bodies':
-        args.rois_ind = 1
-        args.num_queries = 16 # 10
+        print('roi_name_maps:', roi_name_maps)
 
-    elif args.readout_res == 'faces':
-        args.rois_ind = 2
-        args.num_queries = 16 #12
+        print('lh_challenge_rois:', len(lh_challenge_rois))
+        print('lh_challenge_rois_s:', lh_challenge_rois_s.shape)
 
-    elif args.readout_res == 'places':
-        args.rois_ind = 3
-        args.num_queries = 16 #8
+        args.num_queries = num_queries
 
-    elif args.readout_res == 'words':
-        args.rois_ind = 4
-        args.num_queries = 16 # 12
+        args.lh_vs = lh_challenge_rois_s.shape[1]
+        args.rh_vs = rh_challenge_rois_s.shape[1]   
 
-    elif args.readout_res == 'streams' or args.readout_res == 'streams_inc':
-        args.rois_ind = 5
-        args.num_queries = 16
+        #train_loader, val_loader = fetch_data_loaders(args)
+        train_loader, val_loader = fetch_dataloaders(args, train='train')
+        test_loader = fetch_dataloaders(args, train='test')
 
-    elif args.readout_res == 'hemis':
-        args.rois_ind = 5
-        args.num_queries = 2
-
-    elif args.readout_res == 'voxels':
-        args.rois_ind = [5]
-
-    elif args.readout_res == 'rois_all':
-        args.rois_ind = [0, 1, 2, 3, 4]
-
-    # elif args.readout_res == 'rois_all_ul':
-    #     args.rois_ind = [0, 1, 2, 3, 4, 6]
-
-    lh_challenge_rois_s = []
-    rh_challenge_rois_s = []
-    for r in args.rois_ind:
-
-        #len(roi_name_maps[args.rois_ind])
-        #args.roi_nums = len(roi_name_maps[args.rois_ind])
-
-        lh_rois = torch.tensor(lh_challenge_rois[r]).to(args.device)  # -1
-        rh_rois = torch.tensor(rh_challenge_rois[r]).to(args.device)  # -1
+    elif args.dataset == 'nsd_gen':
+        
+        args.hemi = 'lh'
+        args.data_dir = "/engram/nklab/datasets/natural_scene_dataset/model_training_datasets/neural_data"
+        args.imgs_dir = "/engram/nklab/datasets/natural_scene_dataset/nsddata_stimuli/stimuli/nsd"
+        dataset = nsd_dataset_avg(args, split='train')
+        train_loader = torch.utils.data.DataLoader(
+                            dataset,
+                            batch_size=32,
+                            num_workers=4,
+                            pin_memory=True,
+                        )
+    
+        imgs, betas = next(iter(train_loader))
+        print(betas['rh'].shape)
 
         
-        for i in range(1, len(roi_name_maps[r])):
-            lh_challenge_rois_s.append(torch.where(lh_rois == i, 1, 0))
-            rh_challenge_rois_s.append(torch.where(rh_rois == i, 1, 0))
+        neural_data_path = Path(
+            "/engram/nklab/datasets/natural_scene_dataset/model_training_datasets/neural_data"
+        )
+        metadata = np.load(
+            neural_data_path / f"metadata_sub-{int(args.subj):02}.npy", allow_pickle=True
+        ).item()
+        lh_roi_masks = metadata[f"lh_rois"] # returns roi, (num_voxels) where true if voxel is in roi
+        rh_roi_masks = metadata[f"rh_rois"] # returns roi, (num_voxels) where true if voxel is in roi
 
-    lh_challenge_rois_s = torch.vstack(lh_challenge_rois_s)
-    rh_challenge_rois_s = torch.vstack(rh_challenge_rois_s)
-
-    print('lh_challenge_rois_s.shape:', lh_challenge_rois_s.shape)
-    print('rh_challenge_rois_s.shape:', rh_challenge_rois_s.shape)
-
-    lh_challenge_rois_0 = torch.where(lh_challenge_rois_s.sum(0) == 0, 1, 0)
-    rh_challenge_rois_0 = torch.where(rh_challenge_rois_s.sum(0) == 0, 1, 0)
-
-    print('lh_challenge_rois_0.sum:', lh_challenge_rois_0.sum())
-
-    lh_challenge_rois_s = torch.cat((lh_challenge_rois_s, lh_challenge_rois_0[None,:]), dim=0)
-    rh_challenge_rois_s = torch.cat((rh_challenge_rois_s, rh_challenge_rois_0[None,:]), dim=0)
-
-    print('lh_challenge_rois_s.shape:', lh_challenge_rois_s.shape)
-    print('rh_challenge_rois_s.shape:', rh_challenge_rois_s.shape)
-
-    args.lh_vs = lh_challenge_rois_s.shape[1]
-    args.rh_vs = rh_challenge_rois_s.shape[1]   
-
-    if args.readout_res == 'voxels':
-        args.num_queries = args.lh_vs + args.rh_vs
-    elif args.readout_res == 'rois_all':
-        args.num_queries = lh_challenge_rois_s.shape[0] + rh_challenge_rois_s.shape[0]
-
-
-    #train_loader, val_loader = fetch_data_loaders(args)
-    train_loader, val_loader = fetch_dataloaders(args, train='train')
-    test_loader = fetch_dataloaders(args, train='test')
+        print(lh_roi_masks.keys())
+        args.lh_vs = betas['lh'].shape[1]
+        args.rh_vs = betas['rh'].shape[1]
 
     model = brain_encoder(args) #get_model(args)
     model = model.cuda() 
