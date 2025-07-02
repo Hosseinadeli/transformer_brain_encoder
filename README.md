@@ -24,21 +24,18 @@ approach proposes a mechanistic model of how visual information from
 retinotopic maps can be routed based on the relevance of the input content to
 different category-selective regions.
 
-<!-- 
-Adeli, H., Minni, S., & Kriegeskorte, N. (2023). Predicting brain activity using Transformers. bioRxiv, 2023-08. [[bioRxiv](https://www.biorxiv.org/content/10.1101/2023.08.02.551743v1.abstract)]
+Adeli, H., Sun, M., & Kriegeskorte, N. (2025). Transformer brain encoders explain human high-level visual responses. arXiv preprint arXiv:2505.17329. [[arxiv](https://arxiv.org/abs/2505.17329)]
 
 ``` bibtex
-@article{adeli2023predicting,
-  title={Predicting brain activity using Transformers},
-  author={Adeli, Hossein and Minni, Sun and Kriegeskorte, Nikolaus},
-  journal={bioRxiv},
-  pages={2023--08},
-  year={2023},
-  publisher={Cold Spring Harbor Laboratory}
-} 
+@article{adeli2025transformer,
+  title={Transformer brain encoders explain human high-level visual responses},
+  author={Adeli, Hossein and Sun, Minni and Kriegeskorte, Nikolaus},
+  journal={arXiv preprint arXiv:2505.17329},
+  year={2025}
+}
 
 ``` 
--->
+
 
 
 ## Model Architecture
